@@ -1,0 +1,7 @@
+OBJ/*
+CORE/readme.txt
+USER/EventRecorderStub.scvd
+USER/DebugConfig/*
+USER/Listings/*
+*.uvoptx
+*.uvguix.*

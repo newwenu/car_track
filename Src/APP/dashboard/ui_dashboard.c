@@ -206,6 +206,11 @@ void ui_set_mode(ui_mode_t mode)
     }
 }
 
+ui_mode_t ui_get_mode(void)
+{
+    return s_mode;
+}
+
 void ui_refresh(void)
 {
     if (s_current_page == UI_PAGE_MAIN)

@@ -29,8 +29,9 @@ void ui_set_speed(u16 speed);
 /* 设置里程（范围 0~99999） */
 void ui_set_mileage(u32 mileage);
 
-/* 设置运行模式 */
+/* 设置/获取运行模式 */
 void ui_set_mode(ui_mode_t mode);
+ui_mode_t ui_get_mode(void);
 
 /* 计时器控制（主界面时间显示 MM:SS） */
 void ui_timer_start(void);

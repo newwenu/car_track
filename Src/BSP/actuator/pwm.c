@@ -5,6 +5,7 @@ void pwm_motor_init(u16 arr, u16 psc)
     GPIO_InitTypeDef GPIO_InitStructure;
     TIM_TimeBaseInitTypeDef TIM_TimeBaseStructure;
     TIM_OCInitTypeDef TIM_OCInitStructure;
+    NVIC_InitTypeDef NVIC_InitStructure;
 
     RCC_APB1PeriphClockCmd(BSP_MOTOR_PWM_TIM_CLK, ENABLE);
     RCC_APB2PeriphClockCmd(BSP_MOTOR_PWM_CLK, ENABLE);
@@ -33,6 +34,17 @@ void pwm_motor_init(u16 arr, u16 psc)
 
     TIM_ARRPreloadConfig(BSP_MOTOR_PWM_TIM, ENABLE);
     TIM_Cmd(BSP_MOTOR_PWM_TIM, ENABLE);
+
+    /* TIM2 PWM 频率为 10kHz（100us），借 Update 中断软件 10 分频得到 1ms 系统 tick。
+     * 不影响 CH1/CH2 的电机 PWM 输出。 */
+    TIM_ClearFlag(BSP_MOTOR_PWM_TIM, TIM_FLAG_Update);
+    TIM_ITConfig(BSP_MOTOR_PWM_TIM, TIM_IT_Update, ENABLE);
+
+    NVIC_InitStructure.NVIC_IRQChannel = TIM2_IRQn;
+    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;
+    NVIC_InitStructure.NVIC_IRQChannelSubPriority = 1;
+    NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
+    NVIC_Init(&NVIC_InitStructure);
 }
 
 void pwm_motor_set(u16 left, u16 right)

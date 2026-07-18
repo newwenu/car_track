@@ -30,9 +30,10 @@ void encoder_init(void)
     EXTI_InitStructure.EXTI_LineCmd = ENABLE;
     EXTI_Init(&EXTI_InitStructure);
 
+    /* 注意：EXTI9_5_IRQn 与按键模式键共享，最终优先级由 key_start_irq_init 统一设置 */
     NVIC_InitStructure.NVIC_IRQChannel = BSP_ENC_L_IRQ;
-    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 2;
-    NVIC_InitStructure.NVIC_IRQChannelSubPriority = 2;
+    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 3;
+    NVIC_InitStructure.NVIC_IRQChannelSubPriority = 3;
     NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
     NVIC_Init(&NVIC_InitStructure);
 }
@@ -50,9 +51,14 @@ void encoder_right_inc(void)
 int encoder_read(void)
 {
     int val;
+
+    /* 读数和清零需原子执行，防止中断期间丢脉冲 */
+    __disable_irq();
     val = (int)(enc_left_pulse + enc_right_pulse);
     enc_left_pulse = 0;
     enc_right_pulse = 0;
+    __enable_irq();
+
     return val;
 }
 

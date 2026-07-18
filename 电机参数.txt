@@ -1,0 +1,6 @@
+ 减  速  比：48:1
+ 轮胎直径：6.6cm
+ 工作电压：DC3V      DC5V        DC6V 
+ 工作电流：100mA    100mA       120mA
+ 空载转速：100rpm   190rpm     240rpm
+ 空载速度：20m/min  39m/min  48m/min

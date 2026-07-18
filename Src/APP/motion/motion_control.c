@@ -2,10 +2,14 @@
 #include "../../BSP/actuator/motor.h"
 #include "../../BSP/actuator/pwm.h"
 #include "../../BSP/system/config.h"
+#include "../app.h"
 #include <stddef.h>
 
-/* 速度斜坡步进：每 50ms 变化 5%，0~100% 约 1s，实现无级平滑调速 */
-#define MOTION_RAMP_STEP    5
+/* 速度斜坡步进：保持与原来 50ms/5% 相同的总斜坡时间约 1s。
+ * 现在 motion_update() 每 APP_MOTOR_PERIOD_MS 调用一次，故步进按比例缩小。
+ * 按电机参数小车加速度能力富余，此处取保守斜坡以避免起步打滑。
+ * 若现场起步响应慢，可适当增大步进。 */
+#define MOTION_RAMP_STEP    ((APP_MOTOR_PERIOD_MS * 5) / 50)
 
 static int s_target_left = 0;
 static int s_target_right = 0;
@@ -106,13 +110,9 @@ void motion_update(void)
 
 void motion_set_wheels(int left_pct, int right_pct)
 {
+    /* 仅更新目标速度，不自动解除刹车；刹车释放由调用方显式控制 */
     s_target_left = motion_clamp(left_pct, -100, 100);
     s_target_right = motion_clamp(right_pct, -100, 100);
-
-    if (s_state == MOTION_STATE_BRAKE)
-    {
-        s_state = MOTION_STATE_RUN;
-    }
 }
 
 void motion_run_dir(motion_dir_t dir, int speed_pct)

@@ -673,6 +673,31 @@
               <FileType>1</FileType>
               <FilePath>..\Src\APP\motion\motion_control.c</FilePath>
             </File>
+            <File>
+              <FileName>app_fsm.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Src\APP\control\app_fsm.c</FilePath>
+            </File>
+            <File>
+              <FileName>trace_control.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Src\APP\trace\trace_control.c</FilePath>
+            </File>
+            <File>
+              <FileName>obstacle_guard.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Src\APP\obstacle\obstacle_guard.c</FilePath>
+            </File>
+            <File>
+              <FileName>lap_counter.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Src\APP\mission\lap_counter.c</FilePath>
+            </File>
+            <File>
+              <FileName>alarm_control.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Src\APP\alarm\alarm_control.c</FilePath>
+            </File>
           </Files>
         </Group>
       </Groups>

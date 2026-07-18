@@ -1,5 +1,17 @@
 #include "key.h"
-#include "delay.h"
+
+/* 非阻塞消抖状态：每路按键独立。
+ * key_ext_scan() 由 fsm_update() 每 20ms 调用一次，阈值 2 对应 40ms 消抖。
+ * key_start_scan() 保留，UI 当前使用中断方式，通常不调用。 */
+#define KEY_DEBOUNCE_THRESHOLD  2
+
+typedef struct {
+    u8 released;    /* 1: 已释放，允许检测下一次按下 */
+    u8 cnt;         /* 连续按下采样计数 */
+} key_state_t;
+
+static key_state_t s_start_key = {1, 0};
+static key_state_t s_ext_key   = {1, 0};
 
 void key_init(void)
 {
@@ -17,33 +29,40 @@ void key_init(void)
     GPIO_Init(BSP_KEY_EXT_PORT, &GPIO_InitStructure);
 }
 
-static u8 key_scan(u8 pin_state)
+static u8 key_scan_state(u8 pin_state, key_state_t *ks)
 {
-    static u8 flag = 1;
-    if (flag == 1 && pin_state == 0)
+    u8 result = 0;
+
+    if (pin_state == 0)  /* 按下：上拉输入，低电平有效 */
     {
-        delay_ms(10);
-        if (pin_state == 0)
+        if (ks->released)
         {
-            flag = 0;
-            return 1;
+            ks->cnt++;
+            if (ks->cnt >= KEY_DEBOUNCE_THRESHOLD)
+            {
+                ks->cnt = 0;
+                ks->released = 0;
+                result = 1;
+            }
         }
     }
-    else if (pin_state == 1)
+    else
     {
-        flag = 1;
+        ks->released = 1;
+        ks->cnt = 0;
     }
-    return 0;
+
+    return result;
 }
 
 u8 key_start_scan(void)
 {
-    return key_scan(KEY_START);
+    return key_scan_state(KEY_START, &s_start_key);
 }
 
 u8 key_ext_scan(void)
 {
-    return key_scan(KEY_EXT);
+    return key_scan_state(KEY_EXT, &s_ext_key);
 }
 
 /* 配置 KEY_START（PA5）为下降沿外部中断，供 APP 层模式键使用 */

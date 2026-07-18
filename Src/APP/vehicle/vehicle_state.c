@@ -30,8 +30,8 @@ void vehicle_update(void)
     /* 距离增量：mm * 100 */
     dist_inc_x100 = (u32)pulses * VEHICLE_DIST_PER_PULSE_X100;
 
-    /* 累计里程（cm） */
-    s_distance_cm += dist_inc_x100 / 100;
+    /* 累计里程（cm）：dist_inc_x100 单位是 mm*100，需 /1000 得到 cm */
+    s_distance_cm += dist_inc_x100 / 1000;
 
     /* 速度 = 距离(cm) / 时间(s) = pulses * dist_per_pulse_x100 / sample_ms */
     s_speed_cm_s = (u16)((u32)pulses * VEHICLE_DIST_PER_PULSE_X100 / VEHICLE_SAMPLE_MS);

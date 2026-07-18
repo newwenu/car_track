@@ -23,7 +23,7 @@ typedef enum {
 /* 初始化：默认停车 */
 void motion_init(void);
 
-/* 周期性更新：建议每 APP_TASK_PERIOD_MS 调用一次，完成加减速斜坡 */
+/* 周期性更新：建议每 APP_MOTOR_PERIOD_MS 调用一次，完成加减速斜坡 */
 void motion_update(void);
 
 /* 直接设置左右轮目标速度百分比：-100 ~ +100，正负代表方向 */

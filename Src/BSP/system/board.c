@@ -1,6 +1,7 @@
 #include "board.h"
 #include "delay.h"
 #include "usart.h"
+#include "mic.h"
 
 void all_init(void)
 {
@@ -12,6 +13,7 @@ void all_init(void)
 
     led_init();
     key_init();
+    mic_init();
 
     pwm_motor_init(BSP_MOTOR_PWM_PERIOD, BSP_MOTOR_PWM_PSC);
     motor_init();

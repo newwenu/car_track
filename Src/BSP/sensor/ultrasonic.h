@@ -8,4 +8,8 @@ void  ultrasonic_init(void);
 void  ultrasonic_start(void);
 float ultrasonic_get_distance(void);
 
+/* 测距完成回调，应用层可重定义以快速响应（如紧急刹车）。
+ * 参数 distance 为本次测距结果，单位 cm；0 表示无效。 */
+void ultrasonic_distance_ready_callback(float distance);
+
 #endif

@@ -11,6 +11,21 @@ static volatile u16 us_echo_us  = 0;   /* echo arrival time (us from blind end) 
 static volatile u8  us_ok       = 0;   /* capture complete flag */
 static volatile u8  us_listen   = 0;   /* 0=blind/ignore, 1=listening */
 
+/* [修复] 兼容 Keil MDK / GCC 的弱符号定义 */
+#ifndef __weak
+    #ifdef __GNUC__
+        #define __weak  __attribute__((weak))
+    #else
+        #define __weak
+    #endif
+#endif
+
+/* [修复] 默认空实现；应用层可重定义以快速响应测距结果（用于紧急刹车）*/
+__weak void ultrasonic_distance_ready_callback(float distance)
+{
+    (void)distance;
+}
+
 void ultrasonic_init(void)
 {
     GPIO_InitTypeDef GPIO_InitStructure;
@@ -118,17 +133,36 @@ void ultrasonic_start(void)
  * Poll for the latest completed measurement.
  * Returns last valid distance (cm), or 0.0 if no measurement yet.
  * Auto-retriggers after each successful capture.
+ * [修复] 恢复回调调用 + 超时保护机制
  */
 float ultrasonic_get_distance(void)
 {
+    static u32 s_no_update_cnt = 0;  /* [修复] 连续无更新计数器 */
+
     if (us_ok)
     {
         /* Total flight time = blind zone + captured timer (us)
          * Distance (cm) = flight_time_us / 58
          * (sound travels 1cm in ~29us, round-trip = 58us/cm) */
         us_last_distance = (US_BLIND_US + us_echo_us) / 58.0f;
+
+        /* [修复] 通知应用层测距完成（用于紧急刹车响应）*/
+        ultrasonic_distance_ready_callback(us_last_distance);
+
         us_ok = 0;
-        ultrasonic_trig();  /* auto-start next measurement */
+        s_no_update_cnt = 0;  /* [修复] 重置超时计数 */
+        ultrasonic_trig();     /* auto-start next measurement */
+    }
+    else
+    {
+        /* [修复] 超时保护：防止丢波后一直返回旧数据导致误判 */
+        s_no_update_cnt++;
+        if (s_no_update_cnt > 300)  /* 300次 * 10ms(调用周期) ≈ 3s无更新 */
+        {
+            us_last_distance = 0.0f;  /* 标记无效距离 */
+            s_no_update_cnt = 0;
+            ultrasonic_trig();         /* 强制重新触发测量 */
+        }
     }
     return us_last_distance;
 }

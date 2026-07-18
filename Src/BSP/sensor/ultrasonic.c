@@ -23,7 +23,7 @@ static volatile u8  us_listen   = 0;   /* 0=blind/ignore, 1=listening */
 /* [修复] 默认空实现；应用层可重定义以快速响应测距结果（用于紧急刹车）*/
 __weak void ultrasonic_distance_ready_callback(float distance)
 {
-    (void)distance);
+    (void)distance;
 }
 
 void ultrasonic_init(void)

@@ -598,6 +598,11 @@
               <FileType>1</FileType>
               <FilePath>..\Src\BSP\sensor\adc.c</FilePath>
             </File>
+            <File>
+              <FileName>mic.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Src\BSP\sensor\mic.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

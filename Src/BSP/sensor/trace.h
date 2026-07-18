@@ -6,5 +6,6 @@
 
 void trace_init(void);
 void trace_read(u16 *buf);
+u16  trace_read_ch(u8 ch);
 
 #endif

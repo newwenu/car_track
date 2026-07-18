@@ -6,6 +6,9 @@ static void adc_init_single(void)
 
     RCC_APB2PeriphClockCmd(BSP_TRACE_ADC_CLK, ENABLE);
 
+    RCC_ADCCLKConfig(RCC_PCLK2_Div6);   /* 72M/6=12MHz, within ADC 14MHz spec */
+    ADC_DeInit(BSP_TRACE_ADC);          /* reset all ADC registers to default */
+
     ADC_InitStructure.ADC_Mode = ADC_Mode_Independent;
     ADC_InitStructure.ADC_ScanConvMode = DISABLE;
     ADC_InitStructure.ADC_ContinuousConvMode = DISABLE;
@@ -70,4 +73,9 @@ void trace_read(u16 *buf)
     {
         buf[i] = adc_get_ch(trace_ch[i]);
     }
+}
+
+u16 trace_read_ch(u8 ch)
+{
+    return adc_get_ch(ch);
 }

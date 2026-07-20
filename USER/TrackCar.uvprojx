@@ -589,14 +589,14 @@
               <FilePath>..\Src\BSP\sensor\encoder.c</FilePath>
             </File>
             <File>
-              <FileName>ultrasonic.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Src\BSP\sensor\ultrasonic.c</FilePath>
-            </File>
-            <File>
               <FileName>adc.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Src\BSP\sensor\adc.c</FilePath>
+            </File>
+            <File>
+              <FileName>ultrasonic.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Src\BSP\sensor\ultrasonic.c</FilePath>
             </File>
             <File>
               <FileName>mic.c</FileName>
@@ -702,6 +702,11 @@
               <FileName>alarm_control.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Src\APP\alarm\alarm_control.c</FilePath>
+            </File>
+            <File>
+              <FileName>ui_debug.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Src\APP\dashboard\ui_debug.c</FilePath>
             </File>
           </Files>
         </Group>

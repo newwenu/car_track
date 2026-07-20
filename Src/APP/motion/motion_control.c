@@ -174,3 +174,9 @@ void motion_get_current(int *left_pct, int *right_pct)
     if (left_pct != NULL)  *left_pct = s_current_left;
     if (right_pct != NULL) *right_pct = s_current_right;
 }
+
+void motion_get_target(int *left_pct, int *right_pct)
+{
+    if (left_pct != NULL)  *left_pct = s_target_left;
+    if (right_pct != NULL) *right_pct = s_target_right;
+}

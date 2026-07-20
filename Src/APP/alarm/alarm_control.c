@@ -21,15 +21,34 @@
 static alarm_event_t s_event = ALARM_EVENT_IDLE;
 static u16 s_tick = 0;
 
+static led_mode_t s_stat_mode = LED_MODE_OFF;
+static u16 s_stat_tick = 0;
+
+static void update_stat_led(void);
+
 /* ===================== 接口实现 ===================== */
 
+/* 初始化报警模块 */
 void alarm_control_init(void)
 {
     s_event = ALARM_EVENT_IDLE;
     s_tick = 0;
+    s_stat_mode = LED_MODE_OFF;
+    s_stat_tick = 0;
     buzzer_off();
     led_alarm_off();
     led_stat_off();
+}
+
+/* 设置 LED_STAT 主显示模式 */
+void alarm_control_set_stat_mode(led_mode_t mode)
+{
+    if (mode >= LED_MODE_MAX)
+    {
+        mode = LED_MODE_OFF;
+    }
+    s_stat_mode = mode;
+    s_stat_tick = 0;
 }
 
 void alarm_control_event(alarm_event_t event)
@@ -45,7 +64,7 @@ void alarm_control_event(alarm_event_t event)
 
         case ALARM_EVENT_A_POINT:
             buzzer_beep(A_BEEP_FREQ, A_BEEP_MS);
-            led_stat_toggle();
+            /* LED_STAT 由模式管理器统一控制，此处不再单独 toggle */
             break;
 
         case ALARM_EVENT_FINISHED:
@@ -92,4 +111,75 @@ void alarm_control_update(void)
             /* 这些事件为一次性动作，已在 event() 中处理 */
             break;
     }
+
+    update_stat_led();
+}
+
+/* 根据当前模式刷新 LED_STAT，由 alarm_control_update() 每 20ms 调用一次 */
+static void update_stat_led(void)
+{
+    switch (s_stat_mode)
+    {
+        case LED_MODE_STEADY_ON:
+            led_stat_on();
+            break;
+
+        case LED_MODE_SLOW_BLINK:
+            /* 周期 2s：亮 1s，灭 1s */
+            if ((s_stat_tick % 100) < 50)
+            {
+                led_stat_on();
+            }
+            else
+            {
+                led_stat_off();
+            }
+            break;
+
+        case LED_MODE_FAST_BLINK:
+            /* 周期约 240ms：亮 120ms，灭 120ms */
+            if ((s_stat_tick % 12) < 6)
+            {
+                led_stat_on();
+            }
+            else
+            {
+                led_stat_off();
+            }
+            break;
+
+        case LED_MODE_DOUBLE_FLASH:
+        {
+            /* 闪 100ms - 灭 100ms - 闪 100ms - 长灭 900ms */
+            u16 t = s_stat_tick % 65;
+            if (t < 5 || (t >= 10 && t < 15))
+            {
+                led_stat_on();
+            }
+            else
+            {
+                led_stat_off();
+            }
+            break;
+        }
+
+        case LED_MODE_BREATH:
+            /* 当前无硬件 PWM，使用慢闪作为呼吸灯占位效果 */
+            if ((s_stat_tick % 100) < 50)
+            {
+                led_stat_on();
+            }
+            else
+            {
+                led_stat_off();
+            }
+            break;
+
+        case LED_MODE_OFF:
+        default:
+            led_stat_off();
+            break;
+    }
+
+    s_stat_tick++;
 }

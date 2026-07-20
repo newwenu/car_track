@@ -188,3 +188,20 @@ u8 trace_control_is_lost_timeout(void)
 {
     return s_is_lost && (s_lost_recovery_cnt >= LOST_RECOVERY_TICKS);
 }
+
+float trace_control_get_last_error(void)
+{
+    return s_last_error;
+}
+
+void trace_control_get_lost_info(u8 *lost_cnt, u8 *recovery_cnt)
+{
+    if (lost_cnt != NULL)
+    {
+        *lost_cnt = s_lost_cnt;
+    }
+    if (recovery_cnt != NULL)
+    {
+        *recovery_cnt = s_lost_recovery_cnt;
+    }
+}

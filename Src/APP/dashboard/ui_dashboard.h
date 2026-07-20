@@ -7,6 +7,7 @@
 typedef enum {
     UI_PAGE_MAIN = 0,   /* 主界面：速度 + 时间 + 里程 */
     UI_PAGE_MODE,       /* 模式设定界面 */
+    UI_PAGE_DEBUG,      /* 调试界面：显示内部变量 / 测试功能 */
     UI_PAGE_MAX
 } ui_page_t;
 
@@ -22,6 +23,12 @@ void ui_init(void);
 
 /* 切换当前页面 */
 void ui_switch_page(ui_page_t page);
+
+/* 获取当前页面 */
+ui_page_t ui_get_page(void);
+
+/* 获取当前运行秒数 */
+u16 ui_get_run_seconds(void);
 
 /* 设置速度（范围 0~99） */
 void ui_set_speed(u16 speed);

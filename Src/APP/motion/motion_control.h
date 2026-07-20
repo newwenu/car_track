@@ -47,4 +47,7 @@ motion_state_t motion_get_state(void);
 /* 获取当前左右轮实际速度百分比 */
 void motion_get_current(int *left_pct, int *right_pct);
 
+/* 获取当前左右轮目标速度百分比 */
+void motion_get_target(int *left_pct, int *right_pct);
+
 #endif

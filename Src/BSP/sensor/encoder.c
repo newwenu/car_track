@@ -1,5 +1,6 @@
 #include "encoder.h"
 #include "key.h"
+#include <stddef.h>
 
 static volatile s32 enc_left_pulse = 0;
 static volatile s32 enc_right_pulse = 0;
@@ -60,6 +61,20 @@ int encoder_read(void)
     __enable_irq();
 
     return val;
+}
+
+void encoder_get_counts(s32 *left, s32 *right)
+{
+    __disable_irq();
+    if (left != NULL)
+    {
+        *left = enc_left_pulse;
+    }
+    if (right != NULL)
+    {
+        *right = enc_right_pulse;
+    }
+    __enable_irq();
 }
 
 void EXTI9_5_IRQHandler(void)

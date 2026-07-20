@@ -24,4 +24,10 @@ u8 trace_control_is_lost(void);
 /* 判断丢线后寻线是否已超时 */
 u8 trace_control_is_lost_timeout(void);
 
+/* 获取上一次有效误差（用于观察 D 项与丢线惯性） */
+float trace_control_get_last_error(void);
+
+/* 获取丢线计数器：连续丢线次数与寻线恢复计数 */
+void trace_control_get_lost_info(u8 *lost_cnt, u8 *recovery_cnt);
+
 #endif

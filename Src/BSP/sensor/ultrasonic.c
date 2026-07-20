@@ -1,5 +1,6 @@
 #include "ultrasonic.h"
 #include "delay.h"
+#include <stddef.h>
 
 /* Timing constants (microseconds) */
 #define US_TX_US     500   /* 40kHz TX burst duration */
@@ -186,6 +187,25 @@ float ultrasonic_measure_blocking(void)
         return (US_BLIND_US + us_echo_us) / 58.0f;
     else
         return 0.0f;
+}
+
+/* 调试：获取原始回波时间、完成标志和监听状态（中断保护） */
+void ultrasonic_get_raw(u16 *echo_us, u8 *ok, u8 *listening)
+{
+    __disable_irq();
+    if (echo_us != NULL)
+    {
+        *echo_us = us_echo_us;
+    }
+    if (ok != NULL)
+    {
+        *ok = us_ok;
+    }
+    if (listening != NULL)
+    {
+        *listening = us_listen;
+    }
+    __enable_irq();
 }
 
 /*

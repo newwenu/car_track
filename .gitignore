@@ -5,3 +5,4 @@ USER/DebugConfig/*
 USER/Listings/*
 *.uvoptx
 *.uvguix.*
+docs/*方案.md

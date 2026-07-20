@@ -1,6 +1,7 @@
 #include "app_fsm.h"
 #include "../motion/motion_control.h"
 #include "../dashboard/ui_dashboard.h"
+#include "../dashboard/ui_debug.h"
 #include "../trace/trace_control.h"
 #include "../obstacle/obstacle_guard.h"
 #include "../mission/lap_counter.h"
@@ -27,6 +28,7 @@ static void fsm_enter_running(void)
     /* 从 AVOIDING/BRAKING 恢复时，先释放刹车再进入运行 */
     motion_stop();
     alarm_control_event(ALARM_EVENT_IDLE);
+    alarm_control_set_stat_mode(LED_MODE_STEADY_ON);
 }
 
 static void fsm_enter_avoiding(void)
@@ -34,6 +36,7 @@ static void fsm_enter_avoiding(void)
     s_state = FSM_STATE_AVOIDING;
     motion_brake();
     alarm_control_event(ALARM_EVENT_AVOIDING);
+    alarm_control_set_stat_mode(LED_MODE_FAST_BLINK);
 }
 
 static void fsm_enter_braking(void)
@@ -42,6 +45,7 @@ static void fsm_enter_braking(void)
     motion_brake();
     s_brake_ticks = (u16)(A_STOP_MS / APP_FSM_PERIOD_MS);
     alarm_control_event(ALARM_EVENT_BRAKING);
+    alarm_control_set_stat_mode(LED_MODE_DOUBLE_FLASH);
 }
 
 static void fsm_enter_finished(void)
@@ -50,6 +54,7 @@ static void fsm_enter_finished(void)
     motion_brake();     /* 到终点后能耗制动，避免惯性冲线 */
     ui_timer_stop();
     alarm_control_event(ALARM_EVENT_FINISHED);
+    alarm_control_set_stat_mode(LED_MODE_BREATH);
 }
 
 /* 运行时间累加并检查是否超时；超时则自动切到 FINISHED */
@@ -80,6 +85,7 @@ void fsm_init(void)
     obstacle_guard_init();
     lap_counter_init();
     alarm_control_init();
+    alarm_control_set_stat_mode(LED_MODE_SLOW_BLINK);
 }
 
 void fsm_start(void)
@@ -106,6 +112,7 @@ void fsm_reset(void)
     obstacle_guard_init();
     lap_counter_reset();
     alarm_control_event(ALARM_EVENT_IDLE);
+    alarm_control_set_stat_mode(LED_MODE_SLOW_BLINK);
     ui_timer_stop();
     ui_timer_reset();
 }
@@ -129,7 +136,12 @@ void fsm_update(void)
         case FSM_STATE_IDLE:
         {
             s_run_ms = 0;
-            motion_stop();
+
+            /* DEBUG 电机自检时由调试页控制运动，FSM 不强制停车 */
+            if (!ui_debug_motor_active())
+            {
+                motion_stop();
+            }
 
             /* 使用外接按键 KEY_EXT 作为启动键，避免与 KEY_START 的 UI 功能冲突 */
             if (key_ext_scan())

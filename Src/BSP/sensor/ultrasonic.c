@@ -3,19 +3,30 @@
 #include <stddef.h>
 
 /* Timing constants (microseconds) */
-#define US_TX_US     500   /* 40kHz TX burst duration */
-#define US_BLIND_US  250   /* blind zone (~4cm), skip transducer ringing */
-#define US_TO_US     3500  /* timeout (~65cm range) */
+#define US_TX_US       500    /* 40kHz TX burst duration */
+#define US_BLIND_US    250    /* blind zone (~4cm), skip transducer ringing */
+#define US_TO_US       2000   /* timeout (~34cm range), adjust for longer range */
+
+/* EMA filter: new_val = alpha * raw + (1-alpha) * old, alpha=0.3 gives smooth output */
+#define EMA_ALPHA      0.3f   /* 0.1~0.5: smaller=smoother but slower response */
+#define EMA_ALPHA_FAST 0.8f   /* fast response when obstacle appears (distance decreases) */
+#define EMA_ALPHA_SLOW 0.1f   /* slow change when obstacle disappears (distance increases) */
+
+/* Safety distance when timeout (no echo): keep in hysteresis zone to avoid premature clear */
+#define US_SAFE_DIST_CM   50.0f  /* between AVOID_DIST(20) and AVOID_CLEAR(35) */
+
+/* Obstacle avoidance threshold - must match obstacle_guard.c */
+#define AVOID_DIST_CM     20.0f   /* trigger emergency brake < this distance */
 
 /* Internal state */
-static volatile u16 us_echo_us  = 0;   /* echo arrival time (us from blind end) */
-static volatile u8  us_ok       = 0;   /* capture complete flag */
-static volatile u8  us_listen   = 0;   /* 0=blind/ignore, 1=listening */
+static volatile u16 us_echo_us  = 0;
+static volatile u8  us_ok       = 0;
+static volatile u8  us_listen   = 0;
 
-/* 当前回波引脚上下拉配置：0=下拉(IPD)，1=上拉(IPU)，供调试接口查询 */
-static u8 s_pull_up = 0;
+static float us_ema_dist = 0.0f;     /* EMA filtered distance */
+static u32   us_timeout_cnt = 0;     /* consecutive timeout counter */
 
-/* [修复] 兼容 Keil MDK / GCC 的弱符号定义 */
+/* Weak callback for emergency brake */
 #ifndef __weak
     #ifdef __GNUC__
         #define __weak  __attribute__((weak))
@@ -24,7 +35,6 @@ static u8 s_pull_up = 0;
     #endif
 #endif
 
-/* [修复] 默认空实现；应用层可重定义以快速响应测距结果（用于紧急刹车）*/
 __weak void ultrasonic_distance_ready_callback(float distance)
 {
     (void)distance;
@@ -38,17 +48,15 @@ void ultrasonic_init(void)
     TIM_ICInitTypeDef TIM_ICInitStructure;
     NVIC_InitTypeDef NVIC_InitStructure;
 
-    /*--- TX: TIM1_CH1, PA8, 40kHz PWM ---*/
-    RCC_APB2PeriphClockCmd(BSP_US_TX_CLK, ENABLE);
-    RCC_APB2PeriphClockCmd(BSP_US_TX_TIM_CLK, ENABLE);
+    /* TX: TIM1_CH1, PA8, 40kHz PWM */
+    RCC_APB2PeriphClockCmd(BSP_US_TX_CLK | BSP_US_TX_TIM_CLK | RCC_APB2Periph_AFIO, ENABLE);
 
     GPIO_InitStructure.GPIO_Pin = BSP_US_TX_PIN;
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF_PP;
     GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
     GPIO_Init(BSP_US_TX_PORT, &GPIO_InitStructure);
 
-    TIM_InternalClockConfig(BSP_US_TX_TIM);
-    TIM_TimeBaseStructure.TIM_Period = 1800 - 1;         /* 72M/1800=40kHz */
+    TIM_TimeBaseStructure.TIM_Period = 1800 - 1;
     TIM_TimeBaseStructure.TIM_Prescaler = 0;
     TIM_TimeBaseStructure.TIM_ClockDivision = TIM_CKD_DIV1;
     TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up;
@@ -57,17 +65,16 @@ void ultrasonic_init(void)
 
     TIM_OCInitStructure.TIM_OCMode = TIM_OCMode_PWM1;
     TIM_OCInitStructure.TIM_OutputState = TIM_OutputState_Enable;
-    TIM_OCInitStructure.TIM_Pulse = 900;                 /* 50% duty cycle */
+    TIM_OCInitStructure.TIM_Pulse = 900;
     TIM_OCInitStructure.TIM_OCPolarity = TIM_OCPolarity_High;
     TIM_OC1Init(BSP_US_TX_TIM, &TIM_OCInitStructure);
 
     TIM_OC1PreloadConfig(BSP_US_TX_TIM, TIM_OCPreload_Enable);
     TIM_ARRPreloadConfig(BSP_US_TX_TIM, ENABLE);
     TIM_CtrlPWMOutputs(BSP_US_TX_TIM, ENABLE);
+    TIM_Cmd(BSP_US_TX_TIM, DISABLE);
 
-    TIM_Cmd(BSP_US_TX_TIM, DISABLE);   /* TX off initially */
-
-    /*--- RX: TIM4_CH1, PB6, input capture @ 1us resolution ---*/
+    /* RX: TIM4_CH1, PB6, input capture @ 1us resolution */
     RCC_APB2PeriphClockCmd(BSP_US_ECHO_CLK, ENABLE);
     RCC_APB1PeriphClockCmd(BSP_US_ECHO_TIM_CLK, ENABLE);
 
@@ -75,9 +82,8 @@ void ultrasonic_init(void)
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPD;
     GPIO_Init(BSP_US_ECHO_PORT, &GPIO_InitStructure);
 
-    TIM_InternalClockConfig(BSP_US_ECHO_TIM);
-    TIM_TimeBaseStructure.TIM_Period = 5000 - 1;         /* 5ms = ~86cm max */
-    TIM_TimeBaseStructure.TIM_Prescaler = 72 - 1;        /* 1us tick */
+    TIM_TimeBaseStructure.TIM_Period = 5000 - 1;
+    TIM_TimeBaseStructure.TIM_Prescaler = 72 - 1;
     TIM_TimeBaseStructure.TIM_ClockDivision = TIM_CKD_DIV1;
     TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up;
     TIM_TimeBaseStructure.TIM_RepetitionCounter = 0;
@@ -96,125 +102,167 @@ void ultrasonic_init(void)
     NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
     NVIC_Init(&NVIC_InitStructure);
 
-    TIM_ITConfig(BSP_US_ECHO_TIM, TIM_IT_CC1, ENABLE);
+    TIM_ITConfig(BSP_US_ECHO_TIM, TIM_IT_CC1 | TIM_IT_Update, ENABLE);
     TIM_Cmd(BSP_US_ECHO_TIM, ENABLE);
 }
 
-/*
- * Transmit a 40kHz burst, wait through blind zone, then arm echo capture.
- * Called by ultrasonic_start() and auto-retriggered after each measurement.
- */
 static void ultrasonic_trig(void)
 {
     us_listen = 0;
     us_ok = 0;
     us_echo_us = 0;
 
-    /* 1. TX burst: 500us of 40kHz pulses */
     TIM_SetCounter(BSP_US_TX_TIM, 0);
+    TIM_CtrlPWMOutputs(BSP_US_TX_TIM, ENABLE);
     TIM_Cmd(BSP_US_TX_TIM, ENABLE);
     delay_us(US_TX_US);
     TIM_Cmd(BSP_US_TX_TIM, DISABLE);
+    GPIO_ResetBits(BSP_US_TX_PORT, BSP_US_TX_PIN);
 
-    /* 2. Blind zone: skip transducer ringing & electrical crosstalk */
     delay_us(US_BLIND_US);
 
-    /* 3. Arm capture: reset echo timer, clear pending, start listening */
     TIM_SetCounter(BSP_US_ECHO_TIM, 0);
     TIM_ClearITPendingBit(BSP_US_ECHO_TIM, TIM_IT_CC1);
     us_listen = 1;
 }
 
-static float us_last_distance = 0.0f;
-
-/* Non-blocking: trigger the next measurement cycle */
 void ultrasonic_start(void)
 {
     ultrasonic_trig();
 }
 
-/*
- * Poll for the latest completed measurement.
- * Returns last valid distance (cm), or 0.0 if no measurement yet.
- * Auto-retriggers after each successful capture.
- * [修复] 恢复回调调用 + 超时保护机制
- */
 float ultrasonic_get_distance(void)
 {
-    static u32 s_no_update_cnt = 0;  /* [修复] 连续无更新计数器 */
+    static u32 s_no_update_cnt = 0;
+    static float s_last_valid = 0.0f;
 
     if (us_ok)
     {
-        /* Total flight time = blind zone + captured timer (us)
-         * Distance (cm) = flight_time_us / 58
-         * (sound travels 1cm in ~29us, round-trip = 58us/cm) */
-        us_last_distance = (US_BLIND_US + us_echo_us) / 58.0f;
+        float raw;
 
-        /* [修复] 通知应用层测距完成（用于紧急刹车响应）*/
-        ultrasonic_distance_ready_callback(us_last_distance);
+        if (us_echo_us == 0xFFFF)
+        {
+            raw = 999.0f;
+        }
+        else
+        {
+            raw = (US_BLIND_US + us_echo_us) / 58.0f;
+        }
+
+        if (raw > 200.0f || raw < 0.1f)
+        {
+            raw = s_last_valid;
+        }
+
+        if (raw >= 900.0f)
+        {
+            us_timeout_cnt++;
+
+            if (us_timeout_cnt <= 30)
+            {
+                if (us_ema_dist > 0.0f && us_ema_dist < US_SAFE_DIST_CM)
+                {
+                    raw = us_ema_dist;
+                }
+                else
+                {
+                    raw = US_SAFE_DIST_CM;
+                }
+            }
+            else
+            {
+                float progress = (float)(us_timeout_cnt - 30) / 70.0f;
+                if (progress > 1.0f) progress = 1.0f;
+
+                float target = US_SAFE_DIST_CM + (100.0f - US_SAFE_DIST_CM) * progress;
+                raw = us_ema_dist + (target - us_ema_dist) * 0.1f;
+            }
+        }
+        else
+        {
+            us_timeout_cnt = 0;
+        }
+
+        if (us_ema_dist == 0.0f)
+        {
+            us_ema_dist = raw;
+        }
+        else
+        {
+            float alpha;
+
+            if (raw < us_ema_dist - 5.0f)
+            {
+                alpha = EMA_ALPHA_FAST;
+            }
+            else if (raw > us_ema_dist + 5.0f)
+            {
+                alpha = EMA_ALPHA_SLOW;
+            }
+            else
+            {
+                alpha = EMA_ALPHA;
+            }
+
+            us_ema_dist = alpha * raw + (1.0f - alpha) * us_ema_dist;
+        }
+
+        s_last_valid = us_ema_dist;
+
+        if (raw < AVOID_DIST_CM || (us_ema_dist > 0.0f && us_ema_dist < AVOID_DIST_CM))
+        {
+            float callback_dist = (raw < us_ema_dist) ? raw : us_ema_dist;
+            ultrasonic_distance_ready_callback(callback_dist);
+        }
 
         us_ok = 0;
-        s_no_update_cnt = 0;  /* [修复] 重置超时计数 */
-        ultrasonic_trig();     /* auto-start next measurement */
+        s_no_update_cnt = 0;
+        ultrasonic_trig();
     }
     else
     {
-        /* [修复] 超时保护：防止丢波后一直返回旧数据导致误判 */
         s_no_update_cnt++;
-        if (s_no_update_cnt > 300)  /* 300次 * 10ms(调用周期) ≈ 3s无更新 */
+        if (s_no_update_cnt > 10)
         {
-            us_last_distance = 0.0f;  /* 标记无效距离 */
+            us_ema_dist = 999.0f;
             s_no_update_cnt = 0;
-            ultrasonic_trig();         /* 强制重新触发测量 */
+            ultrasonic_trig();
         }
     }
-    return us_last_distance;
+
+    return us_ema_dist;
 }
 
-/*
- * Blocking convenience function — matches user's Test_Distance() pattern.
- * Blocks up to ~3.5ms for a single synchronous measurement.
- * Returns distance in cm, or 0.0 on timeout.
- */
 float ultrasonic_measure_blocking(void)
 {
-    u32 timeout;
-
     ultrasonic_trig();
 
-    timeout = US_TO_US;
-    while (!us_ok && --timeout) { /* spin */ }
-    us_listen = 0;
+    while (!us_ok)
+    {
+        if (TIM_GetCounter(BSP_US_ECHO_TIM) >= US_TO_US)
+        {
+            us_listen = 0;
+            return 0.0f;
+        }
+    }
 
-    if (us_ok)
-        return (US_BLIND_US + us_echo_us) / 58.0f;
-    else
-        return 0.0f;
+    us_listen = 0;
+    return (US_BLIND_US + us_echo_us) / 58.0f;
 }
 
-/* 调试：获取原始回波时间、完成标志和监听状态（中断保护） */
 void ultrasonic_get_raw(u16 *echo_us, u8 *ok, u8 *listening)
 {
     __disable_irq();
-    if (echo_us != NULL)
-    {
-        *echo_us = us_echo_us;
-    }
-    if (ok != NULL)
-    {
-        *ok = us_ok;
-    }
-    if (listening != NULL)
-    {
-        *listening = us_listen;
-    }
+    if (echo_us) *echo_us = us_echo_us;
+    if (ok) *ok = us_ok;
+    if (listening) *listening = us_listen;
     __enable_irq();
 }
 
-/* 调试：动态切换回波引脚上下拉，用于验证传感器是否需要上拉 */
 void ultrasonic_set_pull(u8 pull_up)
 {
     GPIO_InitTypeDef GPIO_InitStructure;
+    static u8 s_pull_up = 0;
 
     s_pull_up = pull_up ? 1 : 0;
     GPIO_InitStructure.GPIO_Pin = BSP_US_ECHO_PIN;
@@ -222,25 +270,45 @@ void ultrasonic_set_pull(u8 pull_up)
     GPIO_Init(BSP_US_ECHO_PORT, &GPIO_InitStructure);
 }
 
-/* 调试：查询当前回波引脚上下拉配置 */
 u8 ultrasonic_get_pull(void)
 {
-    return s_pull_up;
+    return 0;
 }
 
-/*
- * TIM4 capture interrupt — fires on first rising edge after blind zone.
- * Capture time = echo arrival time from end of blind zone.
- */
 void TIM4_IRQHandler(void)
 {
     if (TIM_GetITStatus(BSP_US_ECHO_TIM, TIM_IT_CC1) == SET)
     {
         if (us_listen)
         {
-            us_echo_us = TIM_GetCapture1(BSP_US_ECHO_TIM);
-            us_ok = 1;
+            u16 capture = TIM_GetCapture1(BSP_US_ECHO_TIM);
+
+            if (capture >= 20 && capture <= US_TO_US)
+            {
+                us_echo_us = capture;
+                us_ok = 1;
+                us_listen = 0;
+            }
+            else if (capture > US_TO_US)
+            {
+                us_echo_us = 0xFFFF;
+                us_ok = 1;
+                us_listen = 0;
+            }
         }
+
         TIM_ClearITPendingBit(BSP_US_ECHO_TIM, TIM_IT_CC1);
+    }
+
+    if (TIM_GetITStatus(BSP_US_ECHO_TIM, TIM_IT_Update) == SET)
+    {
+        if (us_listen)
+        {
+            us_echo_us = 0xFFFF;
+            us_ok = 1;
+            us_listen = 0;
+        }
+
+        TIM_ClearITPendingBit(BSP_US_ECHO_TIM, TIM_IT_Update);
     }
 }

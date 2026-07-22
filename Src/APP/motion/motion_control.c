@@ -21,9 +21,9 @@ static float s_motor_right_gain = 1.00f;
 
 /* 起步助力：从静止目标 0 切换到非零目标时，先给一个较高占空比
  * 克服静摩擦/启动死区，持续一段时间后恢复斜坡控制。
- * KICK_PCT 按现场电机启动阈值调整（当前电源 7.9V，50% 不转、80% 才转，
- * 说明启动阈值在 60%~70% 附近，此处取 75% 留有余量）。 */
-#define MOTION_STARTUP_KICK_PCT     75
+ * 电机死区补偿已将非零输出抬高到约 50%，故 kick 只需略高于死区
+ * 即可打破静摩擦，取 55% 避免冲击过大。 */
+#define MOTION_STARTUP_KICK_PCT     55
 #define MOTION_STARTUP_KICK_TICKS   (150 / APP_MOTOR_PERIOD_MS)
 
 static int s_target_left = 0;

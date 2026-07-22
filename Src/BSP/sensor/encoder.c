@@ -4,6 +4,8 @@
 
 static volatile s32 enc_left_pulse = 0;
 static volatile s32 enc_right_pulse = 0;
+static volatile s32 enc_left_total = 0;   /* 上电以来累计，不清零 */
+static volatile s32 enc_right_total = 0;  /* 上电以来累计，不清零 */
 
 void encoder_init(void)
 {
@@ -42,11 +44,13 @@ void encoder_init(void)
 void encoder_left_inc(void)
 {
     enc_left_pulse++;
+    enc_left_total++;
 }
 
 void encoder_right_inc(void)
 {
     enc_right_pulse++;
+    enc_right_total++;
 }
 
 int encoder_read(void)
@@ -68,11 +72,11 @@ void encoder_get_counts(s32 *left, s32 *right)
     __disable_irq();
     if (left != NULL)
     {
-        *left = enc_left_pulse;
+        *left = enc_left_total;
     }
     if (right != NULL)
     {
-        *right = enc_right_pulse;
+        *right = enc_right_total;
     }
     __enable_irq();
 }

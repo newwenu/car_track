@@ -21,8 +21,8 @@
 #define UI_ACT_LED_PERIOD_TICKS     (500 / UI_TASK_PERIOD_MS)
 #define UI_ACT_BEEP_PERIOD_TICKS    (1000 / UI_TASK_PERIOD_MS)
 
-/* 电机自检周期与速度 */
-#define UI_MOTOR_PERIOD_TICKS       (2000 / UI_TASK_PERIOD_MS)
+/* 电机自检周期与速度：左右原地旋转，每 3s 切换一次 */
+#define UI_MOTOR_PERIOD_TICKS       (3000 / UI_TASK_PERIOD_MS)
 #define UI_MOTOR_SPEED_PCT          80
 
 /* 电机补偿标定参数：固定速度直行 2 秒，根据编码器脉冲差计算建议增益 */
@@ -49,7 +49,8 @@ static s32 s_calib_enc_right = 0;
 static float s_calib_left_gain = 1.0f;
 static float s_calib_right_gain = 1.0f;
 
-static const char *s_motor_dir_name[] = {"FWD", "BWD", "LFT", "RGT"};
+static const motion_dir_t s_motor_dir[] = {MOTION_DIR_LEFT, MOTION_DIR_RIGHT};
+static const char *s_motor_dir_name[] = {"LFT", "RGT"};
 
 static void ui_debug_stop_motor(void);
 
@@ -63,7 +64,7 @@ static void ui_debug_clear(void)
 static void ui_debug_draw_header(void)
 {
     char buf[16];
-    const char *name[] = {"INFO", "TRACE", "STATE", "ACT", "MOTOR", "USONIC"};
+    const char *name[] = {"INFO", "TRACE", "ACT", "MOTOR", "USONIC"};
 
     sprintf(buf, "DBG:%s", name[s_page]);
     oled_spi_show_string(0, 0, (u8 *)buf, 8);
@@ -80,9 +81,18 @@ static void ui_debug_draw_info(void)
     s32 enc_left = 0;
     s32 enc_right = 0;
 
-    sprintf(buf, "E:%+4d D:%3d",
-            (int)(trace_control_get_error() * 100.0f),
-            (int)obstacle_guard_get_distance());
+    {
+        float dist = obstacle_guard_get_distance();
+        int dist_display;
+        if (dist >= 49.0f) {
+            dist_display = -1;
+        } else {
+            dist_display = (int)dist;
+        }
+        sprintf(buf, "E:%+4d D:%3d",
+                (int)(trace_control_get_error() * 100.0f),
+                dist_display);
+    }
     oled_spi_show_string(0, 1, (u8 *)buf, 8);
 
     sprintf(buf, "V:%2d L:%d/%d",
@@ -166,7 +176,7 @@ static void ui_debug_draw_trace(void)
     oled_spi_show_string(0, 5, (u8 *)buf, 8);
 }
 
-/* 系统状态页 */
+/* 系统状态页已暂时移除，简化调试界面
 static void ui_debug_draw_state(void)
 {
     char buf[32];
@@ -196,6 +206,7 @@ static void ui_debug_draw_state(void)
     sprintf(buf, "US:%4d O:%d I:%d", echo_us, us_ok, us_listen);
     oled_spi_show_string(0, 5, (u8 *)buf, 8);
 }
+*/
 
 /* 外部报警 LED + 蜂鸣器自检页 */
 static void ui_debug_draw_act(void)
@@ -264,10 +275,10 @@ static void ui_debug_draw_motor(void)
 
     oled_spi_show_string(0, 1, (u8 *)buf, 8);
 
-    /* 标定结果显示区 */
+    /* 简单前进测结果显示区 */
     if (s_motor_calib_state == 1)
     {
-        sprintf(buf, "CALIB RUN %d%%", UI_MOTOR_CALIB_SPEED_PCT);
+        sprintf(buf, "FWD TEST %d%%", UI_MOTOR_CALIB_SPEED_PCT);
         oled_spi_show_string(0, 3, (u8 *)buf, 8);
         sprintf(buf, "T:%d/%d", s_motor_calib_tick, UI_MOTOR_CALIB_TICKS);
         oled_spi_show_string(0, 4, (u8 *)buf, 8);
@@ -282,7 +293,7 @@ static void ui_debug_draw_motor(void)
     }
     else
     {
-        oled_spi_show_string(0, 3, (u8 *)"KEY EXT:CALIB", 8);
+        oled_spi_show_string(0, 3, (u8 *)"KEY EXT:FWD TEST", 8);
         oled_spi_show_string(0, 4, (u8 *)"HOLD 2s:EXIT", 8);
     }
 }
@@ -371,10 +382,10 @@ static void ui_debug_update_motor(void)
 
     if ((s_motor_tick % UI_MOTOR_PERIOD_TICKS) == 0)
     {
-        s_motor_dir_idx = (s_motor_dir_idx + 1) % 4;
+        s_motor_dir_idx = (s_motor_dir_idx + 1) % 2;
     }
 
-    motion_run_dir((motion_dir_t)s_motor_dir_idx, UI_MOTOR_SPEED_PCT);
+    motion_run_dir(s_motor_dir[s_motor_dir_idx], UI_MOTOR_SPEED_PCT);
 }
 
 /* 停止电机自检 */
@@ -399,7 +410,14 @@ static void ui_debug_draw_ultrasonic(void)
     ultrasonic_get_raw(&echo_us, &us_ok, &us_listen);
     pin_high = GPIO_ReadInputDataBit(BSP_US_ECHO_PORT, BSP_US_ECHO_PIN);
 
-    sprintf(buf, "D:%3dcm", (int)obstacle_guard_get_distance());
+    {
+        float dist = obstacle_guard_get_distance();
+        if (dist >= 49.0f) {
+            sprintf(buf, "D: --cm");
+        } else {
+            sprintf(buf, "D:%3.0fcm", dist);
+        }
+    }
     oled_spi_show_string(0, 1, (u8 *)buf, 8);
 
     sprintf(buf, "ECHO:%4dus", echo_us);
@@ -463,9 +481,7 @@ void ui_debug_draw(void)
             ui_debug_draw_trace();
             break;
 
-        case UI_DEBUG_STATE:
-            ui_debug_draw_state();
-            break;
+        /* UI_DEBUG_STATE 已暂时移除 */
 
         case UI_DEBUG_ACT:
             ui_debug_draw_act();
@@ -487,7 +503,7 @@ void ui_debug_draw(void)
 /* 串口周期性输出关键内部变量，便于 PC 端查看/录波 */
 static void ui_debug_serial_print(void)
 {
-    const char *name[] = {"INFO", "TRACE", "STATE", "ACT", "MOTOR", "USONIC"};
+    const char *name[] = {"INFO", "TRACE", "ACT", "MOTOR", "USONIC"};
     int target_left = 0, target_right = 0;
     int current_left = 0, current_right = 0;
     s32 enc_left = 0, enc_right = 0;
@@ -510,21 +526,33 @@ static void ui_debug_serial_print(void)
     trace_control_get_lost_info(&lost_cnt, &recovery_cnt);
     ultrasonic_get_raw(&echo_us, &us_ok, &us_listen);
 
-    printf("[DBG:%s] E:%+4d D:%3d V:%2d L:%d "
-           "A:%4d,%4d,%4d,%4d "
-           "TL:%+4d TR:%+4d ML:%+4d MR:%+4d "
-           "FSM:%d MOT:%d LOST:%d\r\n",
-           name[s_page],
-           (int)(trace_control_get_error() * 100.0f),
-           (int)obstacle_guard_get_distance(),
-           vehicle_get_speed_cm_s(),
-           lap_counter_get_laps(),
-           adc[0], adc[1], adc[2], adc[3],
-           target_left, target_right,
-           current_left, current_right,
-           (int)fsm_get_state(),
-           (int)motion_get_state(),
-           trace_control_is_lost());
+    {
+        float dist = obstacle_guard_get_distance();
+        const char *dist_str;
+        char dist_buf[8];
+        if (dist >= 49.0f) {
+            dist_str = "--";
+        } else {
+            sprintf(dist_buf, "%3d", (int)dist);
+            dist_str = dist_buf;
+        }
+
+        printf("[DBG:%s] E:%+4d D:%s V:%2d L:%d "
+               "A:%4d,%4d,%4d,%4d "
+               "TL:%+4d TR:%+4d ML:%+4d MR:%+4d "
+               "FSM:%d MOT:%d LOST:%d\r\n",
+               name[s_page],
+               (int)(trace_control_get_error() * 100.0f),
+               dist_str,
+               vehicle_get_speed_cm_s(),
+               lap_counter_get_laps(),
+               adc[0], adc[1], adc[2], adc[3],
+               target_left, target_right,
+               current_left, current_right,
+               (int)fsm_get_state(),
+               (int)motion_get_state(),
+               trace_control_is_lost());
+    }
 
     printf("[DBG:%s] EL:%+6ld ER:%+6ld LE:%+4d LC:%d RC:%d "
            "US:%4d O:%d I:%d\r\n",

@@ -7,9 +7,9 @@
 typedef enum {
     UI_DEBUG_INFO = 0,  /* 综合内部变量 */
     UI_DEBUG_TRACE,     /* 循迹原始数据 */
-    UI_DEBUG_STATE,     /* 系统状态 */
+    /* UI_DEBUG_STATE,  系统状态页已暂时移除，简化调试界面 */
     UI_DEBUG_ACT,       /* 外部报警 LED + 蜂鸣器自检 */
-    UI_DEBUG_MOTOR,     /* 电机 IO 自检（正/反/左转/右转） */
+    UI_DEBUG_MOTOR,     /* 电机 IO 自检（原地左转/右转） */
     UI_DEBUG_ULTRASONIC,/* 超声原始数据与上下拉测试 */
     UI_DEBUG_MAX
 } ui_debug_page_t;

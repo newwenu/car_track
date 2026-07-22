@@ -1,6 +1,22 @@
 #include "motor.h"
 #include "pwm.h"
 
+/* 电机死区补偿：实测占空比低于约 50% 时无法克服静摩擦，
+ * 将非零速度线性映射到 [MOTOR_MIN_DUTY, BSP_MOTOR_PWM_PERIOD] 区间，
+ * 保证任何非零目标都能输出足以启动电机的电压。 */
+#define MOTOR_MIN_DUTY          (BSP_MOTOR_PWM_PERIOD / 2)
+
+static u16 motor_deadband_comp(u16 pwm)
+{
+    if (pwm == 0)
+    {
+        return 0;
+    }
+    return (u16)(MOTOR_MIN_DUTY +
+                 (u32)pwm * (BSP_MOTOR_PWM_PERIOD - MOTOR_MIN_DUTY) /
+                 BSP_MOTOR_PWM_PERIOD);
+}
+
 void motor_init(void)
 {
     GPIO_InitTypeDef GPIO_InitStructure;
@@ -67,7 +83,7 @@ void motor_run(int left_speed, int right_speed)
         right_pwm = 0;
     }
 
-    pwm_motor_set(left_pwm, right_pwm);
+    pwm_motor_set(motor_deadband_comp(left_pwm), motor_deadband_comp(right_pwm));
 }
 
 void motor_stop(void)

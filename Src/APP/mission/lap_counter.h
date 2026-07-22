@@ -18,6 +18,9 @@ u8 lap_counter_get_laps(void);
 /* 是否已完成 2 圈 */
 u8 lap_counter_is_finished(void);
 
+/* 获取目标圈数 */
+u8 lap_counter_get_target(void);
+
 /* 重置圈数 */
 void lap_counter_reset(void);
 

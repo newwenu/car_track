@@ -12,6 +12,9 @@ static volatile u16 us_echo_us  = 0;   /* echo arrival time (us from blind end) 
 static volatile u8  us_ok       = 0;   /* capture complete flag */
 static volatile u8  us_listen   = 0;   /* 0=blind/ignore, 1=listening */
 
+/* 当前回波引脚上下拉配置：0=下拉(IPD)，1=上拉(IPU)，供调试接口查询 */
+static u8 s_pull_up = 0;
+
 /* [修复] 兼容 Keil MDK / GCC 的弱符号定义 */
 #ifndef __weak
     #ifdef __GNUC__
@@ -206,6 +209,23 @@ void ultrasonic_get_raw(u16 *echo_us, u8 *ok, u8 *listening)
         *listening = us_listen;
     }
     __enable_irq();
+}
+
+/* 调试：动态切换回波引脚上下拉，用于验证传感器是否需要上拉 */
+void ultrasonic_set_pull(u8 pull_up)
+{
+    GPIO_InitTypeDef GPIO_InitStructure;
+
+    s_pull_up = pull_up ? 1 : 0;
+    GPIO_InitStructure.GPIO_Pin = BSP_US_ECHO_PIN;
+    GPIO_InitStructure.GPIO_Mode = s_pull_up ? GPIO_Mode_IPU : GPIO_Mode_IPD;
+    GPIO_Init(BSP_US_ECHO_PORT, &GPIO_InitStructure);
+}
+
+/* 调试：查询当前回波引脚上下拉配置 */
+u8 ultrasonic_get_pull(void)
+{
+    return s_pull_up;
 }
 
 /*

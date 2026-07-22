@@ -64,6 +64,11 @@ u8 lap_counter_is_finished(void)
     return (s_lap_count >= LAP_TARGET);
 }
 
+u8 lap_counter_get_target(void)
+{
+    return LAP_TARGET;
+}
+
 void lap_counter_reset(void)
 {
     s_debounce = 0;

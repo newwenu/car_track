@@ -128,7 +128,6 @@ void fsm_update(void)
     int right_pct = 0;
 
     /* 状态机管辖的业务模块更新（与 app.c 的多速率调度对齐） */
-    lap_counter_update();
     alarm_control_update();
 
     switch (s_state)
@@ -143,8 +142,9 @@ void fsm_update(void)
                 motion_stop();
             }
 
-            /* 使用外接按键 KEY_EXT 作为启动键，避免与 KEY_START 的 UI 功能冲突 */
-            if (key_ext_scan())
+            /* 使用外接按键 KEY_EXT 作为启动键，避免与 KEY_START 的 UI 功能冲突。
+             * 在 MOTOR 调试页时 KEY_EXT 被调试页占用做标定，FSM 不再响应。 */
+            if (!ui_debug_motor_active() && key_ext_scan())
             {
                 fsm_start();
             }
@@ -153,6 +153,9 @@ void fsm_update(void)
 
         case FSM_STATE_RUNNING:
         {
+            /* 仅在运行状态更新计圈，避免 IDLE/调试等阶段误触发 */
+            lap_counter_update();
+
             /* 运行总时长保护：超过 99s 强制结束 */
             fsm_update_run_timer();
             if (fsm_is_timeout())

@@ -14,6 +14,7 @@
 #include "../../BSP/sensor/trace.h"
 #include "../../BSP/sensor/encoder.h"
 #include "../../BSP/sensor/ultrasonic.h"
+#include "../../BSP/input/key.h"
 #include <stdio.h>
 
 /* 外部报警 LED + 蜂鸣器自检周期 */
@@ -22,7 +23,11 @@
 
 /* 电机自检周期与速度 */
 #define UI_MOTOR_PERIOD_TICKS       (2000 / UI_TASK_PERIOD_MS)
-#define UI_MOTOR_SPEED_PCT          30
+#define UI_MOTOR_SPEED_PCT          80
+
+/* 电机补偿标定参数：固定速度直行 2 秒，根据编码器脉冲差计算建议增益 */
+#define UI_MOTOR_CALIB_SPEED_PCT    60
+#define UI_MOTOR_CALIB_TICKS        (2000 / UI_TASK_PERIOD_MS)
 
 /* 串口打印周期：500ms 输出一次，避免 9600 波特率下占用过多时间 */
 #define UI_SERIAL_PERIOD_TICKS      (500 / UI_TASK_PERIOD_MS)
@@ -33,6 +38,16 @@ static u16 s_act_tick = 0;
 static u16 s_motor_tick = 0;
 static u8  s_motor_dir_idx = 0;
 static u16 s_serial_tick = 0;
+
+/* 电机补偿标定状态 */
+static u8  s_motor_calib_state = 0;     /* 0=空闲, 1=运行中, 2=完成 */
+static u16 s_motor_calib_tick = 0;
+static s32 s_calib_enc_left_start = 0;
+static s32 s_calib_enc_right_start = 0;
+static s32 s_calib_enc_left = 0;
+static s32 s_calib_enc_right = 0;
+static float s_calib_left_gain = 1.0f;
+static float s_calib_right_gain = 1.0f;
 
 static const char *s_motor_dir_name[] = {"FWD", "BWD", "LFT", "RGT"};
 
@@ -48,7 +63,7 @@ static void ui_debug_clear(void)
 static void ui_debug_draw_header(void)
 {
     char buf[16];
-    const char *name[] = {"INFO", "TRACE", "STATE", "ACT", "MOTOR"};
+    const char *name[] = {"INFO", "TRACE", "STATE", "ACT", "MOTOR", "USONIC"};
 
     sprintf(buf, "DBG:%s", name[s_page]);
     oled_spi_show_string(0, 0, (u8 *)buf, 8);
@@ -87,7 +102,7 @@ static void ui_debug_draw_info(void)
     oled_spi_show_string(0, 5, (u8 *)buf, 8);
 
     encoder_get_counts(&enc_left, &enc_right);
-    sprintf(buf, "EL:%+5ld ER:%+5ld", enc_left, enc_right);
+    sprintf(buf, "ENC:%+5ld/%+5ld", enc_left, enc_right);
     oled_spi_show_string(0, 6, (u8 *)buf, 8);
 }
 
@@ -96,8 +111,10 @@ static void ui_debug_draw_trace(void)
 {
     char buf[32];
     u16 adc[BSP_TRACE_CH_COUNT];
+    u16 min_val = 0, max_val = 0, th_high = 0, th_low = 0;
     u8 lost_cnt = 0;
     u8 recovery_cnt = 0;
+    u8 calib_state = trace_calib_get_state();
 
     trace_read(adc);
     trace_control_get_lost_info(&lost_cnt, &recovery_cnt);
@@ -108,14 +125,45 @@ static void ui_debug_draw_trace(void)
     sprintf(buf, "A2:%4d A3:%4d", adc[2], adc[3]);
     oled_spi_show_string(0, 2, (u8 *)buf, 8);
 
-    sprintf(buf, "A4:%4d E:%+4d", adc[4],
-            (int)(trace_control_get_error() * 100.0f));
-    oled_spi_show_string(0, 3, (u8 *)buf, 8);
+    if (calib_state == 1)
+    {
+        /* 学习中 */
+        sprintf(buf, "CALIB RUNNING");
+        oled_spi_show_string(0, 3, (u8 *)buf, 8);
+        sprintf(buf, "MOVE B/W 2s");
+        oled_spi_show_string(0, 4, (u8 *)buf, 8);
+    }
+    else if (calib_state == 2)
+    {
+        /* 学习成功：显示通道 0 的阈值作为参考 */
+        trace_calib_get_thresholds(0, &th_high, &th_low);
+        sprintf(buf, "OK H:%4d L:%4d", th_high, th_low);
+        oled_spi_show_string(0, 3, (u8 *)buf, 8);
+        trace_calib_get_range(0, &min_val, &max_val);
+        sprintf(buf, "R:%4d KEY:REDO", max_val - min_val);
+        oled_spi_show_string(0, 4, (u8 *)buf, 8);
+    }
+    else if (calib_state == 3)
+    {
+        /* 学习失败 */
+        sprintf(buf, "CALIB FAIL");
+        oled_spi_show_string(0, 3, (u8 *)buf, 8);
+        sprintf(buf, "KEY:REDO");
+        oled_spi_show_string(0, 4, (u8 *)buf, 8);
+    }
+    else
+    {
+        /* 未学习：显示误差和丢线计数 */
+        sprintf(buf, "E:%+4d LE:%+4d",
+                (int)(trace_control_get_error() * 100.0f),
+                (int)(trace_control_get_last_error() * 100.0f));
+        oled_spi_show_string(0, 3, (u8 *)buf, 8);
+        sprintf(buf, "LC:%d RC:%d", lost_cnt, recovery_cnt);
+        oled_spi_show_string(0, 4, (u8 *)buf, 8);
+    }
 
-    sprintf(buf, "LE:%+4d LC:%d RC:%d",
-            (int)(trace_control_get_last_error() * 100.0f),
-            lost_cnt, recovery_cnt);
-    oled_spi_show_string(0, 4, (u8 *)buf, 8);
+    sprintf(buf, "EXT:CALIB");
+    oled_spi_show_string(0, 5, (u8 *)buf, 8);
 }
 
 /* 系统状态页 */
@@ -136,12 +184,12 @@ static void ui_debug_draw_state(void)
             trace_control_is_lost(), ui_get_run_seconds());
     oled_spi_show_string(0, 2, (u8 *)buf, 8);
 
-    sprintf(buf, "UIMODE:%d DIST:%d",
-            (int)ui_get_mode(), (int)vehicle_get_distance_cm());
+    sprintf(buf, "MODE:%d D:%5lu",
+            (int)ui_get_mode(), vehicle_get_distance_cm());
     oled_spi_show_string(0, 3, (u8 *)buf, 8);
 
     encoder_get_counts(&enc_left, &enc_right);
-    sprintf(buf, "EL:%+5ld ER:%+5ld", enc_left, enc_right);
+    sprintf(buf, "ENC:%+5ld/%+5ld", enc_left, enc_right);
     oled_spi_show_string(0, 4, (u8 *)buf, 8);
 
     ultrasonic_get_raw(&echo_us, &us_ok, &us_listen);
@@ -215,6 +263,87 @@ static void ui_debug_draw_motor(void)
     }
 
     oled_spi_show_string(0, 1, (u8 *)buf, 8);
+
+    /* 标定结果显示区 */
+    if (s_motor_calib_state == 1)
+    {
+        sprintf(buf, "CALIB RUN %d%%", UI_MOTOR_CALIB_SPEED_PCT);
+        oled_spi_show_string(0, 3, (u8 *)buf, 8);
+        sprintf(buf, "T:%d/%d", s_motor_calib_tick, UI_MOTOR_CALIB_TICKS);
+        oled_spi_show_string(0, 4, (u8 *)buf, 8);
+    }
+    else if (s_motor_calib_state == 2)
+    {
+        sprintf(buf, "L:%ld R:%ld", s_calib_enc_left, s_calib_enc_right);
+        oled_spi_show_string(0, 3, (u8 *)buf, 8);
+        sprintf(buf, "LG:%.2f RG:%.2f", s_calib_left_gain, s_calib_right_gain);
+        oled_spi_show_string(0, 4, (u8 *)buf, 8);
+        oled_spi_show_string(0, 5, (u8 *)"KEY:REDO", 8);
+    }
+    else
+    {
+        oled_spi_show_string(0, 3, (u8 *)"KEY EXT:CALIB", 8);
+        oled_spi_show_string(0, 4, (u8 *)"HOLD 2s:EXIT", 8);
+    }
+}
+
+/* 启动电机补偿标定：临时禁用补偿，直行采集编码器脉冲 */
+static void ui_debug_start_motor_calib(void)
+{
+    if (!ui_debug_motor_active())
+    {
+        return;
+    }
+
+    s_motor_calib_state = 1;
+    s_motor_calib_tick = 0;
+    s_calib_enc_left = 0;
+    s_calib_enc_right = 0;
+
+    /* 标定时禁用现有补偿，确保测得的是电机真实差异 */
+    motion_set_gains(1.0f, 1.0f);
+
+    /* 清零编码器起始值 */
+    encoder_get_counts(&s_calib_enc_left_start, &s_calib_enc_right_start);
+
+    /* 固定速度直行 */
+    motion_set_speed(UI_MOTOR_CALIB_SPEED_PCT);
+}
+
+/* 结束电机补偿标定：计算并应用建议增益 */
+static void ui_debug_finish_motor_calib(void)
+{
+    s32 left_now = 0, right_now = 0;
+    float ratio;
+
+    motion_stop();
+
+    encoder_get_counts(&left_now, &right_now);
+    s_calib_enc_left = left_now - s_calib_enc_left_start;
+    s_calib_enc_right = right_now - s_calib_enc_right_start;
+
+    /* 计算建议增益：降低较快一侧的输出 */
+    s_calib_left_gain = 1.0f;
+    s_calib_right_gain = 1.0f;
+
+    if (s_calib_enc_left > 0 && s_calib_enc_right > 0)
+    {
+        if (s_calib_enc_left > s_calib_enc_right)
+        {
+            ratio = (float)s_calib_enc_right / (float)s_calib_enc_left;
+            s_calib_left_gain = ratio;
+        }
+        else
+        {
+            ratio = (float)s_calib_enc_left / (float)s_calib_enc_right;
+            s_calib_right_gain = ratio;
+        }
+    }
+
+    /* 应用标定结果 */
+    motion_set_gains(s_calib_left_gain, s_calib_right_gain);
+
+    s_motor_calib_state = 2;
 }
 
 /* 运行电机自检逻辑：每周期切换一个方向 */
@@ -224,6 +353,17 @@ static void ui_debug_update_motor(void)
     {
         /* 非激活时不在这里停车，避免与 FSM 启动冲突；
          * 切页/退出时会通过 ui_debug_stop_all() 显式停车 */
+        return;
+    }
+
+    /* 标定状态机优先于自检方向切换 */
+    if (s_motor_calib_state == 1)
+    {
+        s_motor_calib_tick++;
+        if (s_motor_calib_tick >= UI_MOTOR_CALIB_TICKS)
+        {
+            ui_debug_finish_motor_calib();
+        }
         return;
     }
 
@@ -242,7 +382,39 @@ static void ui_debug_stop_motor(void)
 {
     s_motor_tick = 0;
     s_motor_dir_idx = 0;
+    s_motor_calib_state = 0;
+    s_motor_calib_tick = 0;
     motion_stop();
+}
+
+/* 超声调试页：显示距离、原始回波、完成/监听标志、引脚电平、上下拉状态 */
+static void ui_debug_draw_ultrasonic(void)
+{
+    char buf[32];
+    u16 echo_us = 0;
+    u8 us_ok = 0;
+    u8 us_listen = 0;
+    u8 pin_high;
+
+    ultrasonic_get_raw(&echo_us, &us_ok, &us_listen);
+    pin_high = GPIO_ReadInputDataBit(BSP_US_ECHO_PORT, BSP_US_ECHO_PIN);
+
+    sprintf(buf, "D:%3dcm", (int)obstacle_guard_get_distance());
+    oled_spi_show_string(0, 1, (u8 *)buf, 8);
+
+    sprintf(buf, "ECHO:%4dus", echo_us);
+    oled_spi_show_string(0, 2, (u8 *)buf, 8);
+
+    sprintf(buf, "OK:%d LSTN:%d", us_ok, us_listen);
+    oled_spi_show_string(0, 3, (u8 *)buf, 8);
+
+    sprintf(buf, "PIN:%s PULL:%s",
+            pin_high ? "H" : "L",
+            ultrasonic_get_pull() ? "UP" : "DN");
+    oled_spi_show_string(0, 4, (u8 *)buf, 8);
+
+    sprintf(buf, "KEY:TOGGLE PULL");
+    oled_spi_show_string(0, 6, (u8 *)buf, 8);
 }
 
 /* 停止当前页可能正在运行的所有 IO 输出 */
@@ -303,6 +475,10 @@ void ui_debug_draw(void)
             ui_debug_draw_motor();
             break;
 
+        case UI_DEBUG_ULTRASONIC:
+            ui_debug_draw_ultrasonic();
+            break;
+
         default:
             break;
     }
@@ -311,7 +487,7 @@ void ui_debug_draw(void)
 /* 串口周期性输出关键内部变量，便于 PC 端查看/录波 */
 static void ui_debug_serial_print(void)
 {
-    const char *name[] = {"INFO", "TRACE", "STATE", "ACT", "MOTOR"};
+    const char *name[] = {"INFO", "TRACE", "STATE", "ACT", "MOTOR", "USONIC"};
     int target_left = 0, target_right = 0;
     int current_left = 0, current_right = 0;
     s32 enc_left = 0, enc_right = 0;
@@ -335,7 +511,7 @@ static void ui_debug_serial_print(void)
     ultrasonic_get_raw(&echo_us, &us_ok, &us_listen);
 
     printf("[DBG:%s] E:%+4d D:%3d V:%2d L:%d "
-           "A:%4d,%4d,%4d,%4d,%4d "
+           "A:%4d,%4d,%4d,%4d "
            "TL:%+4d TR:%+4d ML:%+4d MR:%+4d "
            "FSM:%d MOT:%d LOST:%d\r\n",
            name[s_page],
@@ -343,7 +519,7 @@ static void ui_debug_serial_print(void)
            (int)obstacle_guard_get_distance(),
            vehicle_get_speed_cm_s(),
            lap_counter_get_laps(),
-           adc[0], adc[1], adc[2], adc[3], adc[4],
+           adc[0], adc[1], adc[2], adc[3],
            target_left, target_right,
            current_left, current_right,
            (int)fsm_get_state(),
@@ -371,8 +547,29 @@ void ui_debug_update(void)
     {
         ui_debug_update_act();
     }
+    else if (s_page == UI_DEBUG_TRACE)
+    {
+        /* TRACE 页面下 KEY_EXT 短按触发/重新触发阈值学习 */
+        if (key_ext_scan())
+        {
+            trace_calib_start();
+        }
+    }
     else if (s_page == UI_DEBUG_MOTOR)
     {
+        /* MOTOR 页面下 KEY_EXT 短按触发/重新触发补偿标定 */
+        if (key_ext_scan())
+        {
+            if (s_motor_calib_state == 0 || s_motor_calib_state == 2)
+            {
+                ui_debug_start_motor_calib();
+            }
+            else if (s_motor_calib_state == 1)
+            {
+                /* 运行中再次按下：提前结束并计算 */
+                ui_debug_finish_motor_calib();
+            }
+        }
         ui_debug_update_motor();
     }
 
@@ -395,4 +592,14 @@ u8 ui_debug_motor_active(void)
 u8 ui_debug_is_active(void)
 {
     return s_active;
+}
+
+/* 超声调试页：短按切换回波引脚上下拉 */
+void ui_debug_toggle_ultrasonic_pull(void)
+{
+    if (!s_active || s_page != UI_DEBUG_ULTRASONIC)
+    {
+        return;
+    }
+    ultrasonic_set_pull(!ultrasonic_get_pull());
 }

@@ -70,11 +70,12 @@
 #define BSP_ENC_CLK_ALL         RCC_APB2Periph_GPIOB
 
 /*---------------------------------------------------------------------------
- * 4. 循迹传感器（5路 ADC 模拟量）— PA2, PA3, PA6, PA7, PB0
+* 4. 循迹传感器（4路 ADC 模拟量）— PA2, PA3, PA6, PA7
+*   AO5(PB0/ADC8) 保留为通用 ADC 引脚，不参与循迹计算
  *---------------------------------------------------------------------------*/
 #define BSP_TRACE_ADC           ADC1
 #define BSP_TRACE_ADC_CLK       RCC_APB2Periph_ADC1
-#define BSP_TRACE_CH_COUNT      5
+#define BSP_TRACE_CH_COUNT      4
 
 /* AO1 = ADC1_CH2, PA2, 最右传感器 */
 #define BSP_TRACE_AO1_PORT      GPIOA

@@ -4,6 +4,7 @@
 #include "../../BSP/display/oledfont.h"
 #include "../../BSP/input/key.h"
 #include "../control/app_fsm.h"
+#include "../mission/lap_counter.h"
 #include <stdio.h>
 
 /* Hzk[] 数组中文字索引（与 oledfont.h 中的顺序对应） */
@@ -39,6 +40,12 @@
 /* 计时器：每 1s 增加一次（UI_TASK_PERIOD_MS * UI_TIMER_TICKS = 1000ms） */
 #define UI_TIMER_TICKS      (1000 / UI_TASK_PERIOD_MS)
 
+/* 状态指示器位置与符号 */
+#define UI_STATE_X          116
+#define UI_STATE_Y          0
+#define UI_LAP_X            84
+#define UI_LAP_Y            6
+
 /* 静态变量 */
 static ui_page_t s_current_page = UI_PAGE_MAIN;
 static u16 s_speed = 0;
@@ -50,6 +57,10 @@ static u16 s_timer_count = 0;           /* 计时分频计数 */
 static u8  s_timer_running = 1;         /* 计时器运行标志 */
 
 static u16 s_idle_ticks = 0;            /* 模式界面无操作计时 */
+
+/* 状态与圈数缓存，仅在变化时重绘，避免 OLED 频繁刷新 */
+static fsm_state_t s_last_state = (fsm_state_t)0xFF;
+static u8 s_last_lap = 0xFF;
 
 /* 按键状态机：0=空闲 1=消抖中 2=按下保持 3=长按触发后等待释放 */
 static u8 s_key_state = 0;
@@ -118,6 +129,56 @@ static void ui_draw_mileage(void)
     oled_spi_show_num(32, 4, s_mileage, 5, 16);
 }
 
+/* 状态机状态转简单符号 */
+static char ui_state_to_symbol(fsm_state_t state)
+{
+    switch (state)
+    {
+        case FSM_STATE_IDLE:     return '-';
+        case FSM_STATE_RUNNING:  return '>';
+        case FSM_STATE_AVOIDING: return '!';
+        case FSM_STATE_BRAKING:  return 'B';
+        case FSM_STATE_FINISHED: return '*';
+        default:                 return '?';
+    }
+}
+
+/* 绘制当前逻辑状态符号（主界面右上角） */
+static void ui_draw_state(void)
+{
+    fsm_state_t state = fsm_get_state();
+    if (state != s_last_state)
+    {
+        s_last_state = state;
+        oled_spi_show_char(UI_STATE_X, UI_STATE_Y, ui_state_to_symbol(state), 16);
+    }
+}
+
+/* 绘制圈数指示（主界面底部 L:当前/目标） */
+static void ui_draw_lap(void)
+{
+    u8 cur = lap_counter_get_laps();
+    u8 target = lap_counter_get_target();
+    u8 buf[6];
+
+    if (cur > target)
+    {
+        cur = target;
+    }
+
+    if (cur != s_last_lap)
+    {
+        s_last_lap = cur;
+        buf[0] = 'L';
+        buf[1] = ':';
+        buf[2] = '0' + cur;
+        buf[3] = '/';
+        buf[4] = '0' + target;
+        buf[5] = '\0';
+        oled_spi_show_string(UI_LAP_X, UI_LAP_Y, buf, 16);
+    }
+}
+
 /* 绘制模式字段（正常模式 / 规定模式） */
 static void ui_draw_mode(void)
 {
@@ -157,10 +218,16 @@ void ui_switch_page(ui_page_t page)
 
     if (page == UI_PAGE_MAIN)
     {
+        /* 清屏后强制重绘状态与圈数，避免缓存过滤导致显示消失 */
+        s_last_state = (fsm_state_t)0xFF;
+        s_last_lap = 0xFF;
+
         ui_draw_main_static();
         ui_draw_speed();
         ui_draw_time();
         ui_draw_mileage();
+        ui_draw_state();
+        ui_draw_lap();
     }
     else if (page == UI_PAGE_MODE)
     {
@@ -246,6 +313,8 @@ void ui_refresh(void)
         ui_draw_speed();
         ui_draw_time();
         ui_draw_mileage();
+        ui_draw_state();
+        ui_draw_lap();
     }
     else if (s_current_page == UI_PAGE_MODE)
     {
@@ -292,8 +361,15 @@ static void ui_handle_short_press(void)
 
     if (s_current_page == UI_PAGE_DEBUG)
     {
-        /* DEBUG 页面短按：切换测试项 */
-        ui_debug_next();
+        /* 超声调试页短按：切换上下拉；其他页切换测试项 */
+        if (ui_debug_get_page() == UI_DEBUG_ULTRASONIC)
+        {
+            ui_debug_toggle_ultrasonic_pull();
+        }
+        else
+        {
+            ui_debug_next();
+        }
     }
     else if (s_current_page == UI_PAGE_MAIN)
     {
@@ -345,6 +421,13 @@ void ui_task(void)
                 ui_draw_time();
             }
         }
+    }
+
+    /* 主界面状态与圈数指示刷新 */
+    if (s_current_page == UI_PAGE_MAIN)
+    {
+        ui_draw_state();
+        ui_draw_lap();
     }
 
     /* 中断触发后开始消抖 */

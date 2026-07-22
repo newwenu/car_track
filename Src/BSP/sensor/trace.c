@@ -33,12 +33,12 @@ static u16 adc_get_ch(u8 ch)
     return ADC_GetConversionValue(BSP_TRACE_ADC);
 }
 
+/* 4路循迹通道（AO5 保留初始化但不参与读取） */
 static const u8 trace_ch[BSP_TRACE_CH_COUNT] = {
     BSP_TRACE_AO1_CH,
     BSP_TRACE_AO2_CH,
     BSP_TRACE_AO3_CH,
     BSP_TRACE_AO4_CH,
-    BSP_TRACE_AO5_CH,
 };
 
 void trace_init(void)

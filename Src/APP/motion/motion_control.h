@@ -50,4 +50,8 @@ void motion_get_current(int *left_pct, int *right_pct);
 /* 获取当前左右轮目标速度百分比 */
 void motion_get_target(int *left_pct, int *right_pct);
 
+/* 获取/设置电机不对称补偿增益，用于 DEBUG 页面标定 */
+void motion_get_gains(float *left_gain, float *right_gain);
+void motion_set_gains(float left_gain, float right_gain);
+
 #endif

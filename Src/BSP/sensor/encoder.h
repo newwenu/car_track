@@ -14,4 +14,7 @@ int  encoder_read(void);
  *       但本函数返回的是独立维护的累计总量，不受 encoder_read() 影响。 */
 void encoder_get_counts(s32 *left, s32 *right);
 
+/* 调试：清零累计总计数，用于 PPR 测量等场景 */
+void encoder_reset_totals(void);
+
 #endif

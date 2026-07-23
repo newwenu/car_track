@@ -81,6 +81,15 @@ void encoder_get_counts(s32 *left, s32 *right)
     __enable_irq();
 }
 
+/* 仅供调试页使用：清零累计总脉冲，开始新一轮测量 */
+void encoder_reset_totals(void)
+{
+    __disable_irq();
+    enc_left_total = 0;
+    enc_right_total = 0;
+    __enable_irq();
+}
+
 void EXTI9_5_IRQHandler(void)
 {
     if (EXTI_GetITStatus(BSP_ENC_L_EXTI) != RESET)

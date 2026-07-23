@@ -17,6 +17,100 @@
 #include "../../BSP/sensor/mic.h"
 #include "../../BSP/input/key.h"
 #include <stdio.h>
+#include <string.h>
+
+/* ===================== 编码器 PPR 测量页 ===================== */
+/* 用户流程：KEY1 清零 → 转轮子 1 圈 → 看 PPR 值 */
+#define ENC_MEASURE_MAX      3     /* 最多保存 3 次测量求平均 */
+
+static s32  s_enc_meas[ENC_MEASURE_MAX][2];  /* [n][0]=左 [n][1]=右 */
+static u8   s_enc_meas_cnt = 0;              /* 已完成测量次数 */
+static s32  s_enc_meas_locked[2] = {0, 0};   /* 当前锁定的 PPR */
+
+static void ui_debug_enter_encoder(void)
+{
+    u8 i;
+    for (i = 0; i < ENC_MEASURE_MAX; i++)
+    {
+        s_enc_meas[i][0] = 0;
+        s_enc_meas[i][1] = 0;
+    }
+    s_enc_meas_cnt = 0;
+    s_enc_meas_locked[0] = 0;
+    s_enc_meas_locked[1] = 0;
+    encoder_reset_totals();
+}
+
+static void ui_debug_draw_encoder(void)
+{
+    char buf[36];
+    s32 left = 0, right = 0;
+
+    encoder_get_counts(&left, &right);
+
+    /* y=1: 实时脉冲计数 */
+    sprintf(buf, "L:+%05ld R:+%05ld", left, right);
+    oled_spi_show_string(0, 1, (u8 *)buf, 8);
+
+    /* y=2: 操作提示 */
+    if (left == 0 && right == 0)
+    {
+        oled_spi_show_string(0, 2, (u8 *)"<< TURN 1 REV >>", 8);
+    }
+    else
+    {
+        sprintf(buf, "PPR L:%5ld R:%5ld", left, right);
+        oled_spi_show_string(0, 2, (u8 *)buf, 8);
+    }
+
+    /* y=3: 锁定的 PPR 值 */
+    sprintf(buf, "LOCK: L:%5ld R:%5ld", s_enc_meas_locked[0], s_enc_meas_locked[1]);
+    oled_spi_show_string(0, 3, (u8 *)buf, 8);
+
+    /* y=4: 多次测量记录 */
+    {
+        char m1[8] = "--", m2[8] = "--", m3[8] = "--";
+        if (s_enc_meas_cnt >= 1) sprintf(m1, "%ld/%ld", s_enc_meas[0][0], s_enc_meas[0][1]);
+        if (s_enc_meas_cnt >= 2) sprintf(m2, "%ld/%ld", s_enc_meas[1][0], s_enc_meas[1][1]);
+        if (s_enc_meas_cnt >= 3) sprintf(m3, "%ld/%ld", s_enc_meas[2][0], s_enc_meas[2][1]);
+        sprintf(buf, "M1:%-7s M2:%-7s", m1, m2);
+        oled_spi_show_string(0, 4, (u8 *)buf, 8);
+        if (s_enc_meas_cnt >= 3)
+        {
+            sprintf(buf, "M3:%-7s", m3);
+            oled_spi_show_string(30, 5, (u8 *)buf, 8);
+        }
+    }
+
+    /* y=5~6: 按键说明 */
+    {
+        s32 avg_l = 0, avg_r = 0;
+        u8 i;
+        if (s_enc_meas_cnt > 0)
+        {
+            for (i = 0; i < s_enc_meas_cnt; i++)
+            {
+                avg_l += s_enc_meas[i][0];
+                avg_r += s_enc_meas[i][1];
+            }
+            avg_l /= s_enc_meas_cnt;
+            avg_r /= s_enc_meas_cnt;
+            sprintf(buf, "AVG: L:%4ld R:%4ld (%uX)", avg_l, avg_r, s_enc_meas_cnt);
+            oled_spi_show_string(0, 6, (u8 *)buf, 8);
+        }
+        else
+        {
+            oled_spi_show_string(0, 5, (u8 *)"KEY1:ZERO  KEY2:LOCK", 8);
+            oled_spi_show_string(0, 6, (u8 *)"HOLD 2s -> EXIT", 8);
+        }
+    }
+
+    /* 补一行 KEY 提示（当有测量记录时 y=5 被平均值占用） */
+    if (s_enc_meas_cnt > 0)
+    {
+        oled_spi_show_string(0, 5, (u8 *)"KEY1:ZERO  KEY2:LOCK", 8);
+    }
+}
 
 /* 外部报警 LED + 蜂鸣器自检周期 */
 #define UI_ACT_LED_PERIOD_TICKS     (500 / UI_TASK_PERIOD_MS)
@@ -65,9 +159,15 @@ static void ui_debug_clear(void)
 static void ui_debug_draw_header(void)
 {
     char buf[16];
-    const char *name[] = {"INFO", "MIC","USONIC", "TRACE",  "MOTOR", "ACT"};
-
-    sprintf(buf, "DBG:%s", name[s_page]);
+    const char *page_names[] = {"INFO", "MIC","TRACE","ACT","USONIC","MOTOR","ENCODER"};
+    if (s_page < sizeof(page_names)/sizeof(page_names[0]))
+    {
+        sprintf(buf, "DBG:%s", page_names[s_page]);
+    }
+    else
+    {
+        sprintf(buf, "DBG:??");
+    }
     oled_spi_show_string(0, 0, (u8 *)buf, 8);
 }
 
@@ -510,6 +610,54 @@ static void ui_debug_draw_ultrasonic(void)
     oled_spi_show_string(0, 6, (u8 *)"KEY:NEXT PAGE", 8);
 }
 
+/* 编码器 PPR 测量页更新：KEY1=清零重测，KEY2=锁定当前值 */
+static void ui_debug_update_encoder(void)
+{
+    if (key_start_scan())
+    {
+        /* KEY1: 清零计数器，开始新一轮测量 */
+        encoder_reset_totals();
+        s_enc_meas_locked[0] = 0;
+        s_enc_meas_locked[1] = 0;
+    }
+
+    if (key_ext_scan())
+    {
+        /* KEY2: 锁定当前计数值为 PPR */
+        s32 left = 0, right = 0;
+        encoder_get_counts(&left, &right);
+
+        if (left > 0 || right > 0)
+        {
+            s_enc_meas_locked[0] = left;
+            s_enc_meas_locked[1] = right;
+
+            /* 存入历史记录（循环覆盖） */
+            if (s_enc_meas_cnt < ENC_MEASURE_MAX)
+            {
+                s_enc_meas[s_enc_meas_cnt][0] = left;
+                s_enc_meas[s_enc_meas_cnt][1] = right;
+                s_enc_meas_cnt++;
+            }
+            else
+            {
+                /* 满了就移位覆盖最早的一条 */
+                u8 i;
+                for (i = 0; i < ENC_MEASURE_MAX - 1; i++)
+                {
+                    s_enc_meas[i][0] = s_enc_meas[i + 1][0];
+                    s_enc_meas[i][1] = s_enc_meas[i + 1][1];
+                }
+                s_enc_meas[ENC_MEASURE_MAX - 1][0] = left;
+                s_enc_meas[ENC_MEASURE_MAX - 1][1] = right;
+            }
+
+            /* 锁存后自动清零准备下一次测量 */
+            encoder_reset_totals();
+        }
+    }
+}
+
 /* 停止当前页可能正在运行的所有 IO 输出 */
 static void ui_debug_stop_all(void)
 {
@@ -524,10 +672,11 @@ void ui_debug_enter(void)
     s_serial_tick = 0;
     ui_debug_stop_all();
     ui_debug_clear();
-    
+
     /* 初始化各页面状态 */
-    ui_debug_enter_mic();  /* 初始化MIC调试页状态 */
-    
+    ui_debug_enter_mic();     /* 初始化MIC调试页状态 */
+    ui_debug_enter_encoder(); /* 初始化编码器 PPR 测量页状态 */
+
     ui_debug_draw();
 }
 
@@ -543,6 +692,13 @@ void ui_debug_next(void)
     ui_debug_stop_all();
     s_page = (ui_debug_page_t)((s_page + 1) % UI_DEBUG_MAX);
     ui_debug_clear();
+
+    /* 重新初始化目标页面状态 */
+    if (s_page == UI_DEBUG_ENCODER)
+    {
+        ui_debug_enter_encoder();
+    }
+
     ui_debug_draw();
 }
 
@@ -578,6 +734,10 @@ void ui_debug_draw(void)
             ui_debug_draw_mic();
             break;
 
+        case UI_DEBUG_ENCODER:
+            ui_debug_draw_encoder();
+            break;
+
         default:
             break;
     }
@@ -586,7 +746,7 @@ void ui_debug_draw(void)
 /* 串口周期性输出关键内部变量，便于 PC 端查看/录波 */
 static void ui_debug_serial_print(void)
 {
-    const char *name[] = {"INFO", "MIC", "MOTOR", "USONIC", "TRACE", "ACT"};
+    const char *name[] = {"INFO", "MIC", "TRACE", "ACT", "USONIC", "MOTOR", "ENCODER"};
     int target_left = 0, target_right = 0;
     int current_left = 0, current_right = 0;
     s32 enc_left = 0, enc_right = 0;
@@ -698,7 +858,7 @@ void ui_debug_update(void)
         {
             u8 new_enabled = !mic_is_enabled();
             mic_set_enabled(new_enabled);
-            
+
             /* 反馈提示 */
             if (new_enabled)
             {
@@ -709,13 +869,17 @@ void ui_debug_update(void)
                 buzzer_beep(800, 80);    /* 低音短鸣：已禁用 */
             }
         }
-        
+
         /* 可选：KEY_EXT 长按重置触发计数器 */
         if (key_ext_scan())
         {
             mic_trigger_count = 0;
             mic_last_trigger_tick = (u16)(app_get_tick() & 0xFFFF);
         }
+    }
+    else if (s_page == UI_DEBUG_ENCODER)
+    {
+        ui_debug_update_encoder();
     }
 
     ui_debug_draw();

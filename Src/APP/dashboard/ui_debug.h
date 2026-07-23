@@ -12,6 +12,7 @@ typedef enum {
     UI_DEBUG_ACT,       /* 外部报警 LED + 蜂鸣器自检 */
     UI_DEBUG_ULTRASONIC,/* 超声原始数据与诊断 */
     UI_DEBUG_MOTOR,     /* 电机直线前进与补偿标定 */
+    UI_DEBUG_ENCODER,   /* ★ 编码器 PPR 测量：转轮子一圈测脉冲数 */
     UI_DEBUG_MAX
 } ui_debug_page_t;
 

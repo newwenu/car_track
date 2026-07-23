@@ -70,7 +70,7 @@ static u8   s_lost_cnt = 0;            /* 连续丢线计数 */
 static u8   s_lost_recovery_cnt = 0;   /* 寻线耗时计数 */
 static u8   s_is_lost = 0;             /* 丢线标志 */
 static u8   s_straight_coast_cnt = 0;  /* 直道丢线后继续直行计数 */
-static float s_current_speed = 55.0f;  /* 当前实际速度（平滑后），初始化为NORMAL */
+static float s_current_speed = 65.0f;  /* 当前实际速度（平滑后），初始化为NORMAL */
 
 /* ===================== 内部辅助函数 ===================== */
 

@@ -25,6 +25,13 @@ void lap_counter_update(void)
 {
     s_just_passed = 0;
 
+    /* 暂时禁用计圈，避免调试阶段 A 点误触发影响丢线恢复测试 */
+    (void)s_debounce;
+    (void)s_a_left;
+    (void)s_lap_count;
+    return;
+
+#if 0
     if (!trace_control_is_all_black())
     {
         s_debounce = 0;
@@ -47,6 +54,7 @@ void lap_counter_update(void)
     s_a_left = 0;
     s_lap_count++;
     s_just_passed = 1;
+#endif
 }
 
 u8 lap_counter_just_passed_a(void)

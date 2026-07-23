@@ -5,11 +5,11 @@
 #include "../app.h"
 #include <stddef.h>
 
-/* 速度斜坡步进：保持与原来 50ms/5% 相同的总斜坡时间约 1s。
+/* 速度斜坡步进：原来是 50ms/5%，总斜坡时间约 1s。
  * 现在 motion_update() 每 APP_MOTOR_PERIOD_MS 调用一次，故步进按比例缩小。
- * 按电机参数小车加速度能力富余，此处取保守斜坡以避免起步打滑。
- * 若现场起步响应慢，可适当增大步进。 */
-#define MOTION_RAMP_STEP            ((APP_MOTOR_PERIOD_MS * 5) / 50)
+ * 为减小转弯时目标差速的建立延迟，将步进加倍；起步仍由 150ms 助力保护，
+ * 不易打滑。 */
+#define MOTION_RAMP_STEP            ((APP_MOTOR_PERIOD_MS * 10) / 50)
 
 /* 电机不对称补偿系数：消除左右电机/机械差异导致的直线跑偏。
  * 标定方法：关闭循迹，给左右轮相同 PWM 直行 3 米，测量横向偏移。
@@ -21,9 +21,9 @@ static float s_motor_right_gain = 1.00f;
 
 /* 起步助力：从静止目标 0 切换到非零目标时，先给一个较高占空比
  * 克服静摩擦/启动死区，持续一段时间后恢复斜坡控制。
- * 电机死区补偿已将非零输出抬高到约 50%，故 kick 只需略高于死区
- * 即可打破静摩擦，取 55% 避免冲击过大。 */
-#define MOTION_STARTUP_KICK_PCT     55
+ * 电机运行死区已降低到 40%，为保证 kick 仍能可靠打破静摩擦，
+ * 取 62% 使实际输出与原来 50% 死区 + 55% kick 时相当。 */
+#define MOTION_STARTUP_KICK_PCT     62
 #define MOTION_STARTUP_KICK_TICKS   (150 / APP_MOTOR_PERIOD_MS)
 
 static int s_target_left = 0;

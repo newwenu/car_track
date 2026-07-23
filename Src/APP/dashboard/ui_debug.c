@@ -21,9 +21,11 @@
 #define UI_ACT_LED_PERIOD_TICKS     (500 / UI_TASK_PERIOD_MS)
 #define UI_ACT_BEEP_PERIOD_TICKS    (1000 / UI_TASK_PERIOD_MS)
 
-/* 电机自检周期与速度：左右原地旋转，每 3s 切换一次 */
-#define UI_MOTOR_PERIOD_TICKS       (3000 / UI_TASK_PERIOD_MS)
-#define UI_MOTOR_SPEED_PCT          80
+/* 电机调试参数：直线前进 */
+#define UI_MOTOR_FWD_SPEED_PCT     80      /* 默认前进速度 80% */
+#define UI_MOTOR_FWD_SPEED_MIN     20      /* 最小速度 20% */
+#define UI_MOTOR_FWD_SPEED_MAX     100     /* 最大速度 100% */
+#define UI_MOTOR_FWD_SPEED_STEP    5       /* 速度调节步进 5% */
 
 /* 电机补偿标定参数：固定速度直行 2 秒，根据编码器脉冲差计算建议增益 */
 #define UI_MOTOR_CALIB_SPEED_PCT    60
@@ -35,9 +37,10 @@
 static ui_debug_page_t s_page = UI_DEBUG_INFO;
 static u8  s_active = 0;        /* DEBUG 页是否激活：仅在 enter 后置 1，exit 后清 0 */
 static u16 s_act_tick = 0;
-static u16 s_motor_tick = 0;
-static u8  s_motor_dir_idx = 0;
 static u16 s_serial_tick = 0;
+
+/* 直线前进控制 */
+static int s_fwd_speed = UI_MOTOR_FWD_SPEED_PCT;   /* 当前前进速度 */
 
 /* 电机补偿标定状态 */
 static u8  s_motor_calib_state = 0;     /* 0=空闲, 1=运行中, 2=完成 */
@@ -48,9 +51,6 @@ static s32 s_calib_enc_left = 0;
 static s32 s_calib_enc_right = 0;
 static float s_calib_left_gain = 1.0f;
 static float s_calib_right_gain = 1.0f;
-
-static const motion_dir_t s_motor_dir[] = {MOTION_DIR_LEFT, MOTION_DIR_RIGHT};
-static const char *s_motor_dir_name[] = {"LFT", "RGT"};
 
 static void ui_debug_stop_motor(void);
 
@@ -121,10 +121,8 @@ static void ui_debug_draw_trace(void)
 {
     char buf[32];
     u16 adc[BSP_TRACE_CH_COUNT];
-    u16 min_val = 0, max_val = 0, th_high = 0, th_low = 0;
     u8 lost_cnt = 0;
     u8 recovery_cnt = 0;
-    u8 calib_state = trace_calib_get_state();
 
     trace_read(adc);
     trace_control_get_lost_info(&lost_cnt, &recovery_cnt);
@@ -135,45 +133,13 @@ static void ui_debug_draw_trace(void)
     sprintf(buf, "A2:%4d A3:%4d", adc[2], adc[3]);
     oled_spi_show_string(0, 2, (u8 *)buf, 8);
 
-    if (calib_state == 1)
-    {
-        /* 学习中 */
-        sprintf(buf, "CALIB RUNNING");
-        oled_spi_show_string(0, 3, (u8 *)buf, 8);
-        sprintf(buf, "MOVE B/W 2s");
-        oled_spi_show_string(0, 4, (u8 *)buf, 8);
-    }
-    else if (calib_state == 2)
-    {
-        /* 学习成功：显示通道 0 的阈值作为参考 */
-        trace_calib_get_thresholds(0, &th_high, &th_low);
-        sprintf(buf, "OK H:%4d L:%4d", th_high, th_low);
-        oled_spi_show_string(0, 3, (u8 *)buf, 8);
-        trace_calib_get_range(0, &min_val, &max_val);
-        sprintf(buf, "R:%4d KEY:REDO", max_val - min_val);
-        oled_spi_show_string(0, 4, (u8 *)buf, 8);
-    }
-    else if (calib_state == 3)
-    {
-        /* 学习失败 */
-        sprintf(buf, "CALIB FAIL");
-        oled_spi_show_string(0, 3, (u8 *)buf, 8);
-        sprintf(buf, "KEY:REDO");
-        oled_spi_show_string(0, 4, (u8 *)buf, 8);
-    }
-    else
-    {
-        /* 未学习：显示误差和丢线计数 */
-        sprintf(buf, "E:%+4d LE:%+4d",
-                (int)(trace_control_get_error() * 100.0f),
-                (int)(trace_control_get_last_error() * 100.0f));
-        oled_spi_show_string(0, 3, (u8 *)buf, 8);
-        sprintf(buf, "LC:%d RC:%d", lost_cnt, recovery_cnt);
-        oled_spi_show_string(0, 4, (u8 *)buf, 8);
-    }
-
-    sprintf(buf, "EXT:CALIB");
-    oled_spi_show_string(0, 5, (u8 *)buf, 8);
+    /* 显示误差和丢线计数 */
+    sprintf(buf, "E:%+4d LE:%+4d",
+            (int)(trace_control_get_error() * 100.0f),
+            (int)(trace_control_get_last_error() * 100.0f));
+    oled_spi_show_string(0, 3, (u8 *)buf, 8);
+    sprintf(buf, "LC:%d RC:%d", lost_cnt, recovery_cnt);
+    oled_spi_show_string(0, 4, (u8 *)buf, 8);
 }
 
 /* 系统状态页已暂时移除，简化调试界面
@@ -264,26 +230,17 @@ static void ui_debug_draw_motor(void)
 
     if (ui_debug_motor_active())
     {
-        sprintf(buf, "MOT:%s SPD:%d T:%d",
-                s_motor_dir_name[s_motor_dir_idx],
-                UI_MOTOR_SPEED_PCT, s_motor_tick);
+        sprintf(buf, "MOT:FWD %d%%", s_fwd_speed);
     }
     else
     {
-        sprintf(buf, "MOT:SKIP S:%d", (int)fsm_get_state());
+        sprintf(buf, "MOT:IDLE S:%d", (int)fsm_get_state());
     }
 
     oled_spi_show_string(0, 1, (u8 *)buf, 8);
 
-    /* 简单前进测结果显示区 */
-    if (s_motor_calib_state == 1)
-    {
-        sprintf(buf, "FWD TEST %d%%", UI_MOTOR_CALIB_SPEED_PCT);
-        oled_spi_show_string(0, 3, (u8 *)buf, 8);
-        sprintf(buf, "T:%d/%d", s_motor_calib_tick, UI_MOTOR_CALIB_TICKS);
-        oled_spi_show_string(0, 4, (u8 *)buf, 8);
-    }
-    else if (s_motor_calib_state == 2)
+    /* 显示标定结果或操作提示 */
+    if (s_motor_calib_state == 2)
     {
         sprintf(buf, "L:%ld R:%ld", s_calib_enc_left, s_calib_enc_right);
         oled_spi_show_string(0, 3, (u8 *)buf, 8);
@@ -293,8 +250,17 @@ static void ui_debug_draw_motor(void)
     }
     else
     {
-        oled_spi_show_string(0, 3, (u8 *)"KEY EXT:FWD TEST", 8);
-        oled_spi_show_string(0, 4, (u8 *)"HOLD 2s:EXIT", 8);
+        oled_spi_show_string(0, 3, (u8 *)"KEY UP/DN:SPD", 8);
+        oled_spi_show_string(0, 4, (u8 *)"KEY EXT:CALIB", 8);
+        oled_spi_show_string(0, 5, (u8 *)"HOLD 2s:EXIT", 8);
+    }
+
+    /* 显示当前增益 */
+    {
+        float left_g = 1.0f, right_g = 1.0f;
+        motion_get_gains(&left_g, &right_g);
+        sprintf(buf, "GAIN L%.2f R%.2f", left_g, right_g);
+        oled_spi_show_string(0, 6, (u8 *)buf, 8);
     }
 }
 
@@ -357,7 +323,7 @@ static void ui_debug_finish_motor_calib(void)
     s_motor_calib_state = 2;
 }
 
-/* 运行电机自检逻辑：每周期切换一个方向 */
+/* 运行电机直线前进逻辑 */
 static void ui_debug_update_motor(void)
 {
     if (!ui_debug_motor_active())
@@ -367,7 +333,7 @@ static void ui_debug_update_motor(void)
         return;
     }
 
-    /* 标定状态机优先于自检方向切换 */
+    /* 标定状态机优先 */
     if (s_motor_calib_state == 1)
     {
         s_motor_calib_tick++;
@@ -378,21 +344,14 @@ static void ui_debug_update_motor(void)
         return;
     }
 
-    s_motor_tick++;
-
-    if ((s_motor_tick % UI_MOTOR_PERIOD_TICKS) == 0)
-    {
-        s_motor_dir_idx = (s_motor_dir_idx + 1) % 2;
-    }
-
-    motion_run_dir(s_motor_dir[s_motor_dir_idx], UI_MOTOR_SPEED_PCT);
+    /* 直线前进 */
+    motion_set_wheels(s_fwd_speed, s_fwd_speed);
 }
 
-/* 停止电机自检 */
+/* 停止电机 */
 static void ui_debug_stop_motor(void)
 {
-    s_motor_tick = 0;
-    s_motor_dir_idx = 0;
+    s_fwd_speed = UI_MOTOR_FWD_SPEED_PCT;   /* 恢复默认速度 */
     s_motor_calib_state = 0;
     s_motor_calib_tick = 0;
     motion_stop();
@@ -577,11 +536,8 @@ void ui_debug_update(void)
     }
     else if (s_page == UI_DEBUG_TRACE)
     {
-        /* TRACE 页面下 KEY_EXT 短按触发/重新触发阈值学习 */
-        if (key_ext_scan())
-        {
-            trace_calib_start();
-        }
+        /* 阈值自学习已移除，TRACE 页面仅用于查看原始 ADC 与误差 */
+        (void)0;
     }
     else if (s_page == UI_DEBUG_MOTOR)
     {
@@ -598,6 +554,17 @@ void ui_debug_update(void)
                 ui_debug_finish_motor_calib();
             }
         }
+
+        /* 速度调节：KEY_START 短按切换速度档位 */
+        if (key_start_scan() && s_motor_calib_state != 1)
+        {
+            s_fwd_speed += UI_MOTOR_FWD_SPEED_STEP;
+            if (s_fwd_speed > UI_MOTOR_FWD_SPEED_MAX)
+            {
+                s_fwd_speed = UI_MOTOR_FWD_SPEED_MIN;   /* 循环回最小值 */
+            }
+        }
+
         ui_debug_update_motor();
     }
 

@@ -191,10 +191,12 @@ void fsm_update(void)
             /* 执行循迹：获取目标轮速并下发 */
             trace_control_get_wheel_targets(&left_pct, &right_pct);
 
-            /* 丢线寻线超时：停车结束，防止冲出赛道后乱跑 */
+            /* 丢线寻线超时：先停车等待，不直接结束。
+             * 若后续重新寻到线，FSM 仍在 RUNNING，会自动恢复运行。
+             * 99s 总运行超时保护仍可作为最终安全兜底。 */
             if (trace_control_is_lost_timeout())
             {
-                fsm_enter_finished();
+                motion_stop();
                 break;
             }
 

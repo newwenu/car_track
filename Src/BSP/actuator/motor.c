@@ -2,9 +2,10 @@
 #include "pwm.h"
 
 /* 电机死区补偿：实测占空比低于约 50% 时无法克服静摩擦，
+ * 但起步已由 motion_control 提供 150ms 起步助力，故运行死区可适度降低，
  * 将非零速度线性映射到 [MOTOR_MIN_DUTY, BSP_MOTOR_PWM_PERIOD] 区间，
- * 保证任何非零目标都能输出足以启动电机的电压。 */
-#define MOTOR_MIN_DUTY          (BSP_MOTOR_PWM_PERIOD / 2)
+ * 以保留小差速下的微调能力。 */
+#define MOTOR_MIN_DUTY          ((BSP_MOTOR_PWM_PERIOD * 40) / 100)
 
 static u16 motor_deadband_comp(u16 pwm)
 {

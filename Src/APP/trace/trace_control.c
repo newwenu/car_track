@@ -15,9 +15,9 @@
  * 55% PWM 对应空载约 36cm/s，带载约 22~30cm/s，适合普通循迹。
  * 30% PWM 对应空载约 20cm/s，带载约 12~17cm/s，适合过弯。
  * 若赛道直道较长且小车稳定，可适度提高 BASE_SPEED_NORMAL。 */
-#define BASE_SPEED_NORMAL       55      /* 直道基础速度百分比：调低便于观察调试 */
-#define BASE_SPEED_CURVE        35      /* 弯道基础速度百分比：调低便于观察调试 */
-#define CURVE_ERROR_THR         0.95f    /* |error| 超过此值认为在弯道；4路最大误差为1.5 */
+#define BASE_SPEED_NORMAL       65      /* 直道基础速度百分比：调低便于观察调试 */
+#define BASE_SPEED_CURVE        40      /* 弯道基础速度百分比：调低便于观察调试 */
+// #define CURVE_ERROR_THR         0.95f    /* |error| 超过此值认为在弯道；4路最大误差为1.5 */
 
 /* ===================== 分段PD控制参数 ===================== */
 /* 分段P增益：解决"转不过来"和"转过头"的矛盾。

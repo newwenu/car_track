@@ -361,15 +361,8 @@ static void ui_handle_short_press(void)
 
     if (s_current_page == UI_PAGE_DEBUG)
     {
-        /* 超声调试页短按：切换上下拉；其他页切换测试项 */
-        if (ui_debug_get_page() == UI_DEBUG_ULTRASONIC)
-        {
-            ui_debug_toggle_ultrasonic_pull();
-        }
-        else
-        {
-            ui_debug_next();
-        }
+        /* 所有调试页短按统一行为：切换到下一页 */
+        ui_debug_next();
     }
     else if (s_current_page == UI_PAGE_MAIN)
     {

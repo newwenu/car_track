@@ -65,7 +65,7 @@ static void ui_debug_clear(void)
 static void ui_debug_draw_header(void)
 {
     char buf[16];
-    const char *name[] = {"INFO", "TRACE", "ACT", "MOTOR", "USONIC", "MIC"};
+    const char *name[] = {"INFO", "MIC","USONIC", "TRACE",  "MOTOR", "ACT"};
 
     sprintf(buf, "DBG:%s", name[s_page]);
     oled_spi_show_string(0, 0, (u8 *)buf, 8);
@@ -228,7 +228,7 @@ static void ui_debug_stop_act(void)
 static u8  mic_last_raw = 0;           /* 上次原始电平 */
 static u8  mic_trigger_count = 0;      /* 触发计数器（本次进入页面后） */
 static u16 mic_last_trigger_tick = 0;  /* 上次触发时刻 */
-static u8  mic_enabled_display = 0;     /* 显示用的使能状态缓存 */
+static u8  mic_last_tap = 0;           /* 上次触发类型：1=单次，2=双次 */
 
 /* 声控咪头检测页 - 显示原始电平、消抖状态、触发历史等 */
 static void ui_debug_draw_mic(void)
@@ -262,7 +262,10 @@ static void ui_debug_draw_mic(void)
             elapsed = 0xFFFF - mic_last_trigger_tick + now;
         }
 
-        sprintf(buf, "TRG:%d  %dms ago", mic_trigger_count, elapsed);
+        sprintf(buf, "TRG:%d %c %dms ago",
+                mic_trigger_count,
+                (mic_last_tap == 2) ? 'D' : ((mic_last_tap == 1) ? 'S' : '-'),
+                elapsed);
         oled_spi_show_string(0, 3, (u8 *)buf, 8);
     }
 
@@ -272,10 +275,10 @@ static void ui_debug_draw_mic(void)
 
     /* 第5-6行：操作提示 */
     oled_spi_show_string(0, 5, (u8 *)"KEY1:TGL EN/DIS", 8);
-    
+
     if (enabled)
     {
-        oled_spi_show_string(0, 6, (u8 *)"👏 CLAP TO TEST", 8);
+        oled_spi_show_string(0, 6, (u8 *)"1CLAP:ST 2:SP", 8);
     }
     else
     {
@@ -294,16 +297,17 @@ static void ui_debug_enter_mic(void)
 {
     mic_last_raw = mic_get_raw();
     mic_trigger_count = 0;
+    mic_last_tap = 0;
     mic_last_trigger_tick = (u16)(app_get_tick() & 0xFFFF);
-    mic_enabled_display = mic_is_enabled();
 }
 
 /* 外部调用：当 app.c 检测到有效拍手触发时更新计数器 */
-void ui_debug_mic_on_trigger(void)
+void ui_debug_mic_on_trigger(u8 tap)
 {
     if (s_active && s_page == UI_DEBUG_MIC)
     {
         mic_trigger_count++;
+        mic_last_tap = tap;
         mic_last_trigger_tick = (u16)(app_get_tick() & 0xFFFF);
     }
 }
@@ -480,18 +484,17 @@ static void ui_debug_draw_ultrasonic(void)
     sprintf(buf, "OK:%d LSTN:%d PIN:%c", us_ok, us_listen, pin_high ? 'H' : 'L');
     oled_spi_show_string(0, 3, (u8 *)buf, 8);
 
-    /* 第4行：上下拉模式 + 原始距离（直接读取） */
+    /* 第4行：原始距离（直接读取） - 上下拉调节已禁用 */
     {
         float raw_dist = ultrasonic_get_distance();  /* EMA滤波后的值 */
-        const char *pull_str = ultrasonic_get_pull() ? "UP" : "DN";
-        
+
         if (raw_dist >= 99.0f)
         {
-            sprintf(buf, "PULL:%s RAW:>99cm", pull_str);  /* 远方标识 */
+            sprintf(buf, "RAW:>99cm");  /* 远方标识 */
         }
         else
         {
-            sprintf(buf, "PULL:%s RAW:%.1fcm", pull_str, raw_dist);
+            sprintf(buf, "RAW:%.1fcm", raw_dist);
         }
     }
     oled_spi_show_string(0, 4, (u8 *)buf, 8);
@@ -504,8 +507,7 @@ static void ui_debug_draw_ultrasonic(void)
     oled_spi_show_string(0, 5, (u8 *)buf, 8);
 
     /* 第6行：操作提示 */
-    sprintf(buf, "KEY:TOGGLE PULL");
-    oled_spi_show_string(0, 6, (u8 *)buf, 8);
+    oled_spi_show_string(0, 6, (u8 *)"KEY:NEXT PAGE", 8);
 }
 
 /* 停止当前页可能正在运行的所有 IO 输出 */
@@ -584,7 +586,7 @@ void ui_debug_draw(void)
 /* 串口周期性输出关键内部变量，便于 PC 端查看/录波 */
 static void ui_debug_serial_print(void)
 {
-    const char *name[] = {"INFO", "TRACE", "ACT", "MOTOR", "USONIC", "MIC"};
+    const char *name[] = {"INFO", "MIC", "MOTOR", "USONIC", "TRACE", "ACT"};
     int target_left = 0, target_right = 0;
     int current_left = 0, current_right = 0;
     s32 enc_left = 0, enc_right = 0;
@@ -735,14 +737,4 @@ u8 ui_debug_motor_active(void)
 u8 ui_debug_is_active(void)
 {
     return s_active;
-}
-
-/* 超声调试页：短按切换回波引脚上下拉 */
-void ui_debug_toggle_ultrasonic_pull(void)
-{
-    if (!s_active || s_page != UI_DEBUG_ULTRASONIC)
-    {
-        return;
-    }
-    ultrasonic_set_pull(!ultrasonic_get_pull());
 }

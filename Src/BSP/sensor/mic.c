@@ -13,15 +13,14 @@
 /* ===================== 内部状态 ===================== */
 typedef enum {
     MIC_ST_IDLE,            /* 空闲，等待第一次有效信号 */
-    MIC_ST_DEBOUNCING,      /* 检测到信号，消抖中 */
-    MIC_ST_CONFIRMED,       /* 已确认一次有效信号 */
-    MIC_ST_WAIT_SECOND      /* 等待第二次拍手（如果启用双击模式） */
+    MIC_ST_DEBOUNCE_1,      /* 第一次信号消抖中 */
+    MIC_ST_WAIT_SECOND,     /* 等待第二次拍手（如果启用双击模式） */
+    MIC_ST_DEBOUNCE_2       /* 第二次信号消抖中 */
 } mic_state_t;
 
 static mic_state_t s_state = MIC_ST_IDLE;
 static u8           s_debounce_cnt = 0;
 static u16          s_last_trigger_tick = 0;   /* 上次触发的系统 tick */
-static u8           s_triggered = 0;            /* 本次扫描是否触发（供外部读取） */
 static u8           s_enabled = 0;             /* 声控功能使能标志，默认关闭 */
 
 /* ===================== 接口实现 ===================== */
@@ -42,7 +41,6 @@ void mic_init(void)
     s_state = MIC_ST_IDLE;
     s_debounce_cnt = 0;
     s_last_trigger_tick = 0;
-    s_triggered = 0;
 }
 
 u8 mic_get_raw(void)
@@ -50,40 +48,43 @@ u8 mic_get_raw(void)
     return MIC_DET;
 }
 
-/* 状态机扫描函数，由 app_update() 每 10ms 调用一次 */
+/* 状态机扫描函数，由 app_update() 每 10ms 调用一次。
+ * 返回值：0 = 无触发，1 = 单次拍手，2 = 连续两次拍手。
+ * 当 MIC_DOUBLE_TAP_MS > 0 时，第一次拍手后进入等待窗口；
+ * 窗口内收到第二次拍手返回 2，窗口超时返回 1。 */
 u8 mic_scan(void)
 {
     u8 raw = MIC_DET;
     u32 now;
     u16 elapsed;
-
-    s_triggered = 0;
+    u8 result = 0;
 
     switch (s_state)
     {
         case MIC_ST_IDLE:
             if (!raw)  /* 低电平有效：有声音时 LM393 输出拉低 */
             {
-                s_state = MIC_ST_DEBOUNCING;
+                s_state = MIC_ST_DEBOUNCE_1;
                 s_debounce_cnt = 1;
             }
             break;
 
-        case MIC_ST_DEBOUNCING:
+        case MIC_ST_DEBOUNCE_1:
             if (!raw)  /* 低电平持续，继续消抖计数 */
             {
                 s_debounce_cnt++;
                 if (s_debounce_cnt >= MIC_DEBOUNCE_CNT)
                 {
-                    /* 消抖完成，确认第一次有效信号 */
+                    /* 第一次信号消抖完成 */
 #if MIC_DOUBLE_TAP_MS > 0
                     s_state = MIC_ST_WAIT_SECOND;
+                    s_last_trigger_tick = (u16)(app_get_tick() & 0xFFFF);
 #else
-                    /* 单击模式：立即触发 */
+                    /* 单击模式：立即返回单次触发 */
                     s_state = MIC_ST_IDLE;
-                    s_triggered = 1;
+                    result = 1;
 #endif
-                    s_last_trigger_tick = app_get_tick();
+                    s_debounce_cnt = 0;
                 }
             }
             else
@@ -103,35 +104,52 @@ u8 mic_scan(void)
             }
             else
             {
-                /* tick 溢出处理（32 位溢出约 49.7 天，几乎不会发生） */
+                /* tick 溢出处理（16 位溢出约 65.5s，几乎不会发生） */
                 elapsed = 0xFFFF - (u16)(s_last_trigger_tick - now);
             }
 
-            if (elapsed > MIC_DOUBLE_TAP_MS)
-            {
-                /* 超时未收到第二次拍手，回到空闲 */
-                s_state = MIC_ST_IDLE;
-                s_debounce_cnt = 0;
-            }
-            else if (!raw && s_debounce_cnt == 0)
+            if (!raw)
             {
                 /* 在时间窗口内检测到新的信号（低电平），开始第二次消抖 */
-                s_state = MIC_ST_DEBOUNCING;
+                s_state = MIC_ST_DEBOUNCE_2;
                 s_debounce_cnt = 1;
             }
-            else if (raw)
+            else if (elapsed > MIC_DOUBLE_TAP_MS)
             {
-                /* 等待期间无信号（高电平），保持等待 */
+                /* 超时未收到第二次拍手，判定为单次拍手 */
+                s_state = MIC_ST_IDLE;
+                s_debounce_cnt = 0;
+                result = 1;
+            }
+            break;
+
+        case MIC_ST_DEBOUNCE_2:
+            if (!raw)  /* 第二次信号持续，继续消抖 */
+            {
+                s_debounce_cnt++;
+                if (s_debounce_cnt >= MIC_DEBOUNCE_CNT)
+                {
+                    /* 第二次信号消抖完成，判定为连续拍手 */
+                    s_state = MIC_ST_IDLE;
+                    s_debounce_cnt = 0;
+                    result = 2;
+                }
+            }
+            else
+            {
+                /* 第二次信号中断，回到等待窗口 */
+                s_state = MIC_ST_WAIT_SECOND;
                 s_debounce_cnt = 0;
             }
             break;
 
         default:
             s_state = MIC_ST_IDLE;
+            s_debounce_cnt = 0;
             break;
     }
 
-    return s_triggered;
+    return result;
 }
 
 void mic_set_enabled(u8 enabled)
@@ -142,7 +160,6 @@ void mic_set_enabled(u8 enabled)
         /* 禁用时重置状态机，避免残留状态 */
         s_state = MIC_ST_IDLE;
         s_debounce_cnt = 0;
-        s_triggered = 0;
     }
 }
 

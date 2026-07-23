@@ -64,22 +64,29 @@ void app_update(void)
     obstacle_guard_update();
     motion_update();
 
-    /* 声控起停：全状态响应拍手（需 mic_set_enabled(1) 使能） */
-    if (mic_is_enabled() && mic_scan())
+    /* 声控起停：单次拍手启动，连续两次拍手停止/复位
+     * 需在 DEBUG-MIC 页通过 KEY1 使能 mic_set_enabled(1) */
+    if (mic_is_enabled())
     {
-        /* 通知调试页更新触发计数器（仅当在MIC页面时生效） */
-        ui_debug_mic_on_trigger();
-        
-        if (fsm_get_state() == FSM_STATE_IDLE || fsm_get_state() == FSM_STATE_FINISHED)
+        u8 tap = mic_scan();
+        if (tap != 0)
         {
-            /* 待机/完成状态 → 启动 */
-            fsm_start();
-        }
-        else
-        {
-            /* 运行中（RUNNING/AVOIDING/BRAKING）→ 复位停车 */
-            motion_brake();
-            fsm_reset();
+            /* 通知调试页更新触发计数器（仅当在MIC页面时生效） */
+            ui_debug_mic_on_trigger(tap);
+
+            if (tap == 1 && (fsm_get_state() == FSM_STATE_IDLE ||
+                             fsm_get_state() == FSM_STATE_FINISHED))
+            {
+                /* 待机/完成状态下单次拍手 → 启动 */
+                fsm_start();
+            }
+            else if (tap == 2 && (fsm_get_state() != FSM_STATE_IDLE &&
+                                  fsm_get_state() != FSM_STATE_FINISHED))
+            {
+                /* 运行/避障/A点暂停状态下连续两次拍手 → 紧急停车复位 */
+                motion_brake();
+                fsm_reset();
+            }
         }
     }
 

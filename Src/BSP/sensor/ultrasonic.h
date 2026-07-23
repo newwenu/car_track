@@ -26,4 +26,7 @@ void ultrasonic_get_raw(u16 *echo_us, u8 *ok, u8 *listening);
 void ultrasonic_set_pull(u8 pull_up);
 u8   ultrasonic_get_pull(void);
 
+/* 获取连续超时计数器（用于调试诊断） */
+u32  ultrasonic_get_timeout_cnt(void);
+
 #endif

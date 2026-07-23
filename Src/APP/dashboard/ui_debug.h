@@ -11,6 +11,7 @@ typedef enum {
     UI_DEBUG_ACT,       /* 外部报警 LED + 蜂鸣器自检 */
     UI_DEBUG_MOTOR,     /* 电机 IO 自检（原地左转/右转） */
     UI_DEBUG_ULTRASONIC,/* 超声原始数据与上下拉测试 */
+    UI_DEBUG_MIC,       /* 声控咪头检测与拍手识别调试 */
     UI_DEBUG_MAX
 } ui_debug_page_t;
 
@@ -38,5 +39,8 @@ u8 ui_debug_is_active(void);
 
 /* 超声调试页：切换回波引脚上下拉；非超声页调用无效 */
 void ui_debug_toggle_ultrasonic_pull(void);
+
+/* 声控调试页：由 app.c 在检测到有效拍手时调用，更新触发计数 */
+void ui_debug_mic_on_trigger(void);
 
 #endif

@@ -7,7 +7,7 @@
 /* 施密特触发器阈值：抑制黑白边界抖动。
  * 上升阈值（白→黑）与下降阈值（黑→白）之间形成死区。
  * 死区宽度建议为 ADC 量程的 5%~10%（约 200~400）。 */
-#define TRACE_TH_HIGH_DEFAULT   850     /* ADC 高于此值判定为黑线 */
+#define TRACE_TH_HIGH_DEFAULT   750    /* ADC 高于此值判定为黑线 */
 #define TRACE_TH_LOW_DEFAULT    600     /* ADC 低于此值判定为白底 */
 
 /* 基础速度百分比。
@@ -15,15 +15,34 @@
  * 55% PWM 对应空载约 36cm/s，带载约 22~30cm/s，适合普通循迹。
  * 30% PWM 对应空载约 20cm/s，带载约 12~17cm/s，适合过弯。
  * 若赛道直道较长且小车稳定，可适度提高 BASE_SPEED_NORMAL。 */
-#define BASE_SPEED_NORMAL       40      /* 直道基础速度百分比：调低便于观察调试 */
-#define BASE_SPEED_CURVE        30      /* 弯道基础速度百分比：调低便于观察调试 */
-#define CURVE_ERROR_THR         0.9f    /* |error| 超过此值认为在弯道；4路最大误差为1.5 */
+#define BASE_SPEED_NORMAL       55      /* 直道基础速度百分比：调低便于观察调试 */
+#define BASE_SPEED_CURVE        35      /* 弯道基础速度百分比：调低便于观察调试 */
+#define CURVE_ERROR_THR         0.95f    /* |error| 超过此值认为在弯道；4路最大误差为1.5 */
 
-/* PD 增益：赛道弯道半径约 0.6m，转弯响应偏慢，适度提高 P 增益；
- * D 增益保留一定阻尼，防止超调。 */
-#define LINE_KP                 20      /* 循迹 P 增益 */
-#define LINE_KD                 6       /* 循迹 D 增益 */
-#define LINE_MAX_DIFF           25      /* 最大转向量限制，避免转弯角度过大 */
+/* ===================== 分段PD控制参数 ===================== */
+/* 分段P增益：解决"转不过来"和"转过头"的矛盾。
+ * 小误差时高灵敏度快速响应，大误差时降低增益防止超调。
+ * 配合弯道出口制动机制，有效防止圆弧切线位置出线。 */
+#define LINE_KP_LOW             28      /* 小误差区(|e|<0.5) P增益：提高直道灵敏度 */
+#define LINEKP_MID              20      /* 中误差区(0.5~1.0) P增益：标准响应 */
+#define LINE_KP_HIGH            14      /* 大误差区(|e|>1.0) P增益：防止急弯超调 */
+#define LINE_KD                 8       /* 循迹 D 增益（原6→8，增强阻尼防超调） */
+#define LINE_MAX_DIFF           35      /* 最大转向量限制 */
+
+/* ===================== 平滑速度控制参数 ===================== */
+/* 渐进式速度切换：消除阶跃突变，实现平滑过渡。
+ * 使用一阶低通滤波，每周期向目标速度靠近一定比例。
+ * RATE越大过渡越快，越小越平滑。推荐值0.05~0.15。 */
+#define SPEED_TRANSITION_RATE   0.1f    /* 速度过渡速率：每周期接近目标的10% */
+#define CURVE_ERROR_THR         0.95f   /* |error| 超过此值认为在弯道 */
+
+/* ===================== 弯道出口制动参数 ===================== */
+/* 圆弧切线位置防出线机制：
+ * 当检测到error从大值快速减小时（正在离开弯道），
+ * 提前施加额外制动转向量，抵消车辆惯性。
+ * 类似汽车进弯前预刹车，但这里是"出弯后预纠偏"。 */
+#define EXIT_BRAKE_ZONE         0.6f    /* 制动触发区：|error|低于此值且正在减小 */
+#define EXIT_BRAKE_COEF         4.0f    /* 制动强度系数：乘以error减小速率 */
 
 /* 丢线保护参数：trace 周期 20ms */
 #define LOST_THRESHOLD          3       /* 连续 3 次 (60ms) 全未检测到黑线认为丢线 */
@@ -44,12 +63,14 @@ static u16  s_vals[BSP_TRACE_CH_COUNT];
 static u8   s_black_state[BSP_TRACE_CH_COUNT];  /* 施密特触发器输出：1=黑线，0=白底 */
 static float s_error = 0.0f;
 static float s_last_error = 0.0f;
+static float s_last_last_error = 0.0f;  /* 上上次误差，用于二阶导数（加速度） */
 static int  s_left_pct = 0;
 static int  s_right_pct = 0;
 static u8   s_lost_cnt = 0;            /* 连续丢线计数 */
 static u8   s_lost_recovery_cnt = 0;   /* 寻线耗时计数 */
 static u8   s_is_lost = 0;             /* 丢线标志 */
 static u8   s_straight_coast_cnt = 0;  /* 直道丢线后继续直行计数 */
+static float s_current_speed = 55.0f;  /* 当前实际速度（平滑后），初始化为NORMAL */
 
 /* ===================== 内部辅助函数 ===================== */
 
@@ -141,6 +162,78 @@ static float trace_calc_error(void)
     return s_last_error;
 }
 
+/* 分段P增益选择：根据误差大小动态调整P增益
+ * 解决"转不过来"(小误差响应不足)和"转过头"(大误差超调)的矛盾 */
+static float trace_get_adaptive_kp(float error)
+{
+    float abs_err = (error >= 0.0f) ? error : -error;
+
+    if (abs_err < 0.5f)
+    {
+        /* 小误差区：高灵敏度，快速纠偏 */
+        return LINE_KP_LOW;
+    }
+    else if (abs_err < 1.0f)
+    {
+        /* 中误差区：标准增益 */
+        return LINEKP_MID;
+    }
+    else
+    {
+        /* 大误差区：低增益，防止急弯超调 */
+        return LINE_KP_HIGH;
+    }
+}
+
+/* 弯道出口制动计算：检测error是否正在快速减小（离开弯道）
+ * 如果是，施加额外反向转向量抵消惯性 */
+static float trace_calc_exit_brake(float error, float last_error, float last_last_error)
+{
+    float abs_err = (error >= 0.0f) ? error : -error;
+    float error_vel = error - last_error;      /* 一阶导数（速度） */
+    float error_acc = error_vel - (last_error - last_last_error); /* 二阶导数（加速度） */
+
+    /* 只在以下条件同时满足时触发制动：
+     * 1. 当前误差已进入中等范围（接近切线位置）
+     * 2. error正在减小（向零靠近）
+     * 3. 减小速度较快（明显在回正）
+     * 4. 上次误差较大（确实是从弯道出来） */
+    float abs_last_err = (last_error >= 0.0f) ? last_error : -last_error;
+
+    if ((abs_err < EXIT_BRAKE_ZONE) &&
+        (abs_err > 0.1f) &&              /* 不能太接近0，否则过度敏感 */
+        (error * last_error > 0.0f) &&   /* 同号，都在同一侧 */
+        (error_vel * error < 0.0f) &&    /* error与变化率异号：正在减小 */
+        (abs_last_err > EXIT_BRAKE_ZONE)) /* 确实从大误差回来 */
+    {
+        /* 制动量 = 系数 × 减小速率
+         * error_vel为负值（减小），乘以系数后得到正值或负值的制动量
+         * 方向与error相反，帮助提前回正 */
+        float brake = -EXIT_BRAKE_COEF * error_vel;
+
+        /* 限制最大制动力，防止过度矫正 */
+        const float max_brake = 8.0f;
+        if (brake > max_brake) brake = max_brake;
+        if (brake < -max_brake) brake = -max_brake;
+
+        return brake;
+    }
+
+    return 0.0f;
+}
+
+/* 平滑速度过渡：使用一阶低通滤波实现渐进式速度切换
+ * 消除阶跃突变，让电机加速度连续平滑 */
+static int trace_smooth_speed(int target_speed)
+{
+    /* 低通滤波公式：current = current + rate × (target - current)
+     * 每周期向目标靠近 RATE 的比例 */
+    s_current_speed += SPEED_TRANSITION_RATE * ((float)target_speed - s_current_speed);
+
+    /* 四舍五入到整数 */
+    return (int)(s_current_speed + 0.5f);
+}
+
 /* ===================== 接口实现 ===================== */
 
 void trace_control_init(void)
@@ -153,12 +246,14 @@ void trace_control_init(void)
     }
     s_error = 0.0f;
     s_last_error = 0.0f;
+    s_last_last_error = 0.0f;
     s_left_pct = 0;
     s_right_pct = 0;
     s_lost_cnt = 0;
     s_lost_recovery_cnt = 0;
     s_straight_coast_cnt = 0;
     s_is_lost = 0;
+    s_current_speed = (float)BASE_SPEED_NORMAL;  /* 初始化为直道速度 */
 }
 
 void trace_control_update(void)
@@ -198,21 +293,35 @@ void trace_control_update(void)
     }
     else
     {
-        /* 弯道减速 */
+        /* 确定目标速度（尚未应用，先用于计算） */
+        int target_base_speed;
         if (error > CURVE_ERROR_THR || error < -CURVE_ERROR_THR)
         {
-            base_speed = BASE_SPEED_CURVE;
+            target_base_speed = BASE_SPEED_CURVE;
         }
         else
         {
-            base_speed = BASE_SPEED_NORMAL;
+            target_base_speed = BASE_SPEED_NORMAL;
         }
 
-        /* PD 输出 */
-        diff = LINE_KP * error + LINE_KD * (error - s_last_error);
+        /* 平滑速度过渡：消除阶跃突变 */
+        base_speed = trace_smooth_speed(target_base_speed);
+
+        /* 分段P控制：根据误差大小选择不同增益 */
+        float adaptive_kp = trace_get_adaptive_kp(error);
+
+        /* PD输出（使用自适应KP） */
+        diff = adaptive_kp * error + LINE_KD * (error - s_last_error);
+
+        /* 弯道出口制动：防止圆弧切线位置出线 */
+        float exit_brake = trace_calc_exit_brake(error, s_last_error, s_last_last_error);
+        diff += exit_brake;
+
+        /* 更新误差历史（用于下一次的D项和制动计算） */
+        s_last_last_error = s_last_error;
         s_last_error = error;
 
-        /* 限制最大转向量，防止 0.6m 半径弯道下转弯角度过大 */
+        /* 限制最大转向量 */
         if (diff > LINE_MAX_DIFF)
         {
             diff = LINE_MAX_DIFF;

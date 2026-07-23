@@ -1,5 +1,6 @@
 #include "app.h"
 #include "dashboard/ui_dashboard.h"
+#include "dashboard/ui_debug.h"
 #include "vehicle/vehicle_state.h"
 #include "motion/motion_control.h"
 #include "control/app_fsm.h"
@@ -66,6 +67,9 @@ void app_update(void)
     /* 声控起停：全状态响应拍手（需 mic_set_enabled(1) 使能） */
     if (mic_is_enabled() && mic_scan())
     {
+        /* 通知调试页更新触发计数器（仅当在MIC页面时生效） */
+        ui_debug_mic_on_trigger();
+        
         if (fsm_get_state() == FSM_STATE_IDLE || fsm_get_state() == FSM_STATE_FINISHED)
         {
             /* 待机/完成状态 → 启动 */

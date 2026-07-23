@@ -50,9 +50,18 @@ void obstacle_guard_update(void)
     }
     else
     {
-        /* 在 hysteresis 区间内，不改变计数 */
+        /* 在 hysteresis 区间内（20~35cm）：
+         * - 不增加 trigger_cnt（避免误触发）
+         * - 但允许 clear_cnt 累积（允许渐进式解除）
+         * - 这是修复"无法解除"问题的关键改动 */
+        if (s_triggered == 1)
+        {
+            if (s_clear_cnt < AVOID_CLEAR_DEBOUNCE)
+            {
+                s_clear_cnt++;
+            }
+        }
         s_trigger_cnt = 0;
-        s_clear_cnt = 0;
     }
 
     if (s_trigger_cnt >= AVOID_TRIGGER_DEBOUNCE)

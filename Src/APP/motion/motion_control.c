@@ -17,7 +17,7 @@
  * 默认 1.0/1.0 表示不补偿，有效范围通常在 0.90~1.10 之间。
  * 使用变量而非宏，便于 DEBUG 页面标定时读取/调整。 */
 static float s_motor_left_gain = 1.00f;
-static float s_motor_right_gain = 1.00f;
+static float s_motor_right_gain = 1.03f;
 
 /* 起步助力：从静止目标 0 切换到非零目标时，先给一个较高占空比
  * 克服静摩擦/启动死区，持续一段时间后恢复斜坡控制。

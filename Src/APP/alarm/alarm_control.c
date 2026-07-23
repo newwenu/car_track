@@ -85,9 +85,13 @@ void alarm_control_update(void)
     switch (s_event)
     {
         case ALARM_EVENT_AVOIDING:
-            /* 持续声光报警 */
-            led_alarm_on();
-            buzzer_on(1000);
+            /* 持续声光报警：LED闪烁 + 蜂鸣器常响 */
+            if ((s_tick % 25) == 0)  /* 每500ms切换一次(25×20ms) */
+            {
+                led_alarm_toggle();
+            }
+            s_tick++;
+            buzzer_on(2000);
             break;
 
         case ALARM_EVENT_BRAKING:

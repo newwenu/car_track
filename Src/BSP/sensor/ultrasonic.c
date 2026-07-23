@@ -10,7 +10,7 @@
 /* EMA filter: new_val = alpha * raw + (1-alpha) * old, alpha=0.3 gives smooth output */
 #define EMA_ALPHA      0.3f   /* 0.1~0.5: smaller=smoother but slower response */
 #define EMA_ALPHA_FAST 0.8f   /* fast response when obstacle appears (distance decreases) */
-#define EMA_ALPHA_SLOW 0.1f   /* slow change when obstacle disappears (distance increases) */
+#define EMA_ALPHA_SLOW 0.3f   /* moderate speed when obstacle disappears (distance increases), was 0.1 too slow */
 
 /* Safety distance when timeout (no echo): keep in hysteresis zone to avoid premature clear */
 #define US_SAFE_DIST_CM   50.0f  /* between AVOID_DIST(20) and AVOID_CLEAR(35) */
@@ -149,38 +149,45 @@ float ultrasonic_get_distance(void)
             raw = (US_BLIND_US + us_echo_us) / 58.0f;
         }
 
-        if (raw > 200.0f || raw < 0.1f)
-        {
-            raw = s_last_valid;
-        }
-
         if (raw >= 900.0f)
         {
             us_timeout_cnt++;
 
-            if (us_timeout_cnt <= 30)
+            /* 分段式超时处理策略（解决999被覆盖导致避障无法解除的问题） */
+            if (us_timeout_cnt <= 3)  // 阶段1：极短记忆窗口(30ms)，防止紧贴抖动
             {
-                if (us_ema_dist > 0.0f && us_ema_dist < US_SAFE_DIST_CM)
+                if (us_ema_dist > 0.0f && us_ema_dist < (AVOID_DIST_CM - 5.0f))  // 仅<15cm保持
                 {
-                    raw = us_ema_dist;
+                    raw = us_ema_dist;  // 真正危险距离才保持旧值
                 }
                 else
                 {
-                    raw = US_SAFE_DIST_CM;
+                    raw = US_SAFE_DIST_CM;  // 其他情况立即给安全值(50cm)
                 }
             }
-            else
+            else if (us_timeout_cnt <= 8)  // 阶段2：快速退出区(30~80ms)
             {
-                float progress = (float)(us_timeout_cnt - 30) / 70.0f;
-                if (progress > 1.0f) progress = 1.0f;
+                float exit_ratio = (float)(us_timeout_cnt - 3) / 5.0f;  // 0→1过渡
+                if (exit_ratio > 1.0f) exit_ratio = 1.0f;
 
-                float target = US_SAFE_DIST_CM + (100.0f - US_SAFE_DIST_CM) * progress;
-                raw = us_ema_dist + (target - us_ema_dist) * 0.1f;
+                float target = US_SAFE_DIST_CM;  // 目标：50cm
+                raw = us_ema_dist + (target - us_ema_dist) * exit_ratio;
+                // 快速从旧值过渡到安全距离（而非缓慢漂移）
+            }
+            else  // 阶段3：明确报告无障碍(>80ms)
+            {
+                raw = 100.0f;  // 直接报告100cm，明确表示"远方无目标"
             }
         }
         else
         {
             us_timeout_cnt = 0;
+            
+            /* 正常测量值：进行合理性检查 */
+            if (raw > 200.0f || raw < 0.1f)
+            {
+                raw = s_last_valid;  /* 异常值用上次有效值替代 */
+            }
         }
 
         if (us_ema_dist == 0.0f)
@@ -273,6 +280,11 @@ void ultrasonic_set_pull(u8 pull_up)
 u8 ultrasonic_get_pull(void)
 {
     return 0;
+}
+
+u32 ultrasonic_get_timeout_cnt(void)
+{
+    return us_timeout_cnt;
 }
 
 void TIM4_IRQHandler(void)

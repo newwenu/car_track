@@ -14,6 +14,7 @@
 #include "../../BSP/sensor/trace.h"
 #include "../../BSP/sensor/encoder.h"
 #include "../../BSP/sensor/ultrasonic.h"
+#include "../../BSP/sensor/mic.h"
 #include "../../BSP/input/key.h"
 #include <stdio.h>
 
@@ -64,7 +65,7 @@ static void ui_debug_clear(void)
 static void ui_debug_draw_header(void)
 {
     char buf[16];
-    const char *name[] = {"INFO", "TRACE", "ACT", "MOTOR", "USONIC"};
+    const char *name[] = {"INFO", "TRACE", "ACT", "MOTOR", "USONIC", "MIC"};
 
     sprintf(buf, "DBG:%s", name[s_page]);
     oled_spi_show_string(0, 0, (u8 *)buf, 8);
@@ -223,6 +224,90 @@ static void ui_debug_stop_act(void)
     buzzer_off();
 }
 
+/* ===================== 声控 MIC 调试页 ===================== */
+static u8  mic_last_raw = 0;           /* 上次原始电平 */
+static u8  mic_trigger_count = 0;      /* 触发计数器（本次进入页面后） */
+static u16 mic_last_trigger_tick = 0;  /* 上次触发时刻 */
+static u8  mic_enabled_display = 0;     /* 显示用的使能状态缓存 */
+
+/* 声控咪头检测页 - 显示原始电平、消抖状态、触发历史等 */
+static void ui_debug_draw_mic(void)
+{
+    char buf[36];
+    u8 raw = mic_get_raw();             /* 读取当前原始电平 */
+    u8 enabled = mic_is_enabled();      /* 读取使能状态 */
+
+    /* 第1行：标题 + 使能状态 */
+    sprintf(buf, "MIC:%s  %s", 
+            enabled ? "ON" : "OFF",
+            (raw != mic_last_raw) ? "*" : " ");
+    oled_spi_show_string(0, 1, (u8 *)buf, 8);
+
+    /* 第2行：原始电平 (RAW) 和边沿变化指示 */
+    sprintf(buf, "RAW:%d%s", raw, (raw == 0) ? "(LOW)" : "(HI)");
+    oled_spi_show_string(0, 2, (u8 *)buf, 8);
+
+    /* 第3行：触发统计 */
+    {
+        u16 now = 0;
+        u16 elapsed = 0;
+        
+        now = (u16)(app_get_tick() & 0xFFFF);  /* 取低16位即可 */
+        if (now >= mic_last_trigger_tick)
+        {
+            elapsed = now - mic_last_trigger_tick;
+        }
+        else
+        {
+            elapsed = 0xFFFF - mic_last_trigger_tick + now;
+        }
+
+        sprintf(buf, "TRG:%d  %dms ago", mic_trigger_count, elapsed);
+        oled_spi_show_string(0, 3, (u8 *)buf, 8);
+    }
+
+    /* 第4行：消抖参数显示 */
+    sprintf(buf, "DEB:3cnt(30ms) WIN:800ms");
+    oled_spi_show_string(0, 4, (u8 *)buf, 8);
+
+    /* 第5-6行：操作提示 */
+    oled_spi_show_string(0, 5, (u8 *)"KEY1:TGL EN/DIS", 8);
+    
+    if (enabled)
+    {
+        oled_spi_show_string(0, 6, (u8 *)"👏 CLAP TO TEST", 8);
+    }
+    else
+    {
+        oled_spi_show_string(0, 6, (u8 *)"MIC DISABLED", 8);
+    }
+
+    /* 更新内部状态（用于边沿检测） */
+    mic_last_raw = raw;
+
+    /* 检测是否刚被触发（通过观察tick变化或调用mic_scan的返回值） */
+    /* 注意：这里不主动调用mic_scan，避免重复扫描 */
+}
+
+/* 进入MIC调试页时的初始化 */
+static void ui_debug_enter_mic(void)
+{
+    mic_last_raw = mic_get_raw();
+    mic_trigger_count = 0;
+    mic_last_trigger_tick = (u16)(app_get_tick() & 0xFFFF);
+    mic_enabled_display = mic_is_enabled();
+}
+
+/* 外部调用：当 app.c 检测到有效拍手触发时更新计数器 */
+void ui_debug_mic_on_trigger(void)
+{
+    if (s_active && s_page == UI_DEBUG_MIC)
+    {
+        mic_trigger_count++;
+        mic_last_trigger_tick = (u16)(app_get_tick() & 0xFFFF);
+    }
+}
+
 /* 电机自检页 */
 static void ui_debug_draw_motor(void)
 {
@@ -357,10 +442,10 @@ static void ui_debug_stop_motor(void)
     motion_stop();
 }
 
-/* 超声调试页：显示距离、原始回波、完成/监听标志、引脚电平、上下拉状态 */
+/* 超声调试页：显示距离、原始回波、完成/监听标志、引脚电平、上下拉状态、超时状态 */
 static void ui_debug_draw_ultrasonic(void)
 {
-    char buf[32];
+    char buf[36];
     u16 echo_us = 0;
     u8 us_ok = 0;
     u8 us_listen = 0;
@@ -369,6 +454,7 @@ static void ui_debug_draw_ultrasonic(void)
     ultrasonic_get_raw(&echo_us, &us_ok, &us_listen);
     pin_high = GPIO_ReadInputDataBit(BSP_US_ECHO_PORT, BSP_US_ECHO_PIN);
 
+    /* 第1行：距离值（来自obstacle_guard缓存） */
     {
         float dist = obstacle_guard_get_distance();
         if (dist >= 49.0f) {
@@ -379,17 +465,45 @@ static void ui_debug_draw_ultrasonic(void)
     }
     oled_spi_show_string(0, 1, (u8 *)buf, 8);
 
-    sprintf(buf, "ECHO:%4dus", echo_us);
+    /* 第2行：回波时间 + 超时标记 */
+    if (echo_us == 0xFFFF)
+    {
+        sprintf(buf, "ECHO:TOUT(999)");  /* 超时特殊标识 */
+    }
+    else
+    {
+        sprintf(buf, "ECHO:%4dus", echo_us);
+    }
     oled_spi_show_string(0, 2, (u8 *)buf, 8);
 
-    sprintf(buf, "OK:%d LSTN:%d", us_ok, us_listen);
+    /* 第3行：测量状态 + 引脚电平 */
+    sprintf(buf, "OK:%d LSTN:%d PIN:%c", us_ok, us_listen, pin_high ? 'H' : 'L');
     oled_spi_show_string(0, 3, (u8 *)buf, 8);
 
-    sprintf(buf, "PIN:%s PULL:%s",
-            pin_high ? "H" : "L",
-            ultrasonic_get_pull() ? "UP" : "DN");
+    /* 第4行：上下拉模式 + 原始距离（直接读取） */
+    {
+        float raw_dist = ultrasonic_get_distance();  /* EMA滤波后的值 */
+        const char *pull_str = ultrasonic_get_pull() ? "UP" : "DN";
+        
+        if (raw_dist >= 99.0f)
+        {
+            sprintf(buf, "PULL:%s RAW:>99cm", pull_str);  /* 远方标识 */
+        }
+        else
+        {
+            sprintf(buf, "PULL:%s RAW:%.1fcm", pull_str, raw_dist);
+        }
+    }
     oled_spi_show_string(0, 4, (u8 *)buf, 8);
 
+    /* 第5行：超时诊断信息（新增） */
+    {
+        u32 timeout_cnt = ultrasonic_get_timeout_cnt();  /* 需要添加此接口 */
+        sprintf(buf, "TOUT_CNT:%lu", (unsigned long)timeout_cnt);
+    }
+    oled_spi_show_string(0, 5, (u8 *)buf, 8);
+
+    /* 第6行：操作提示 */
     sprintf(buf, "KEY:TOGGLE PULL");
     oled_spi_show_string(0, 6, (u8 *)buf, 8);
 }
@@ -408,6 +522,10 @@ void ui_debug_enter(void)
     s_serial_tick = 0;
     ui_debug_stop_all();
     ui_debug_clear();
+    
+    /* 初始化各页面状态 */
+    ui_debug_enter_mic();  /* 初始化MIC调试页状态 */
+    
     ui_debug_draw();
 }
 
@@ -454,6 +572,10 @@ void ui_debug_draw(void)
             ui_debug_draw_ultrasonic();
             break;
 
+        case UI_DEBUG_MIC:
+            ui_debug_draw_mic();
+            break;
+
         default:
             break;
     }
@@ -462,7 +584,7 @@ void ui_debug_draw(void)
 /* 串口周期性输出关键内部变量，便于 PC 端查看/录波 */
 static void ui_debug_serial_print(void)
 {
-    const char *name[] = {"INFO", "TRACE", "ACT", "MOTOR", "USONIC"};
+    const char *name[] = {"INFO", "TRACE", "ACT", "MOTOR", "USONIC", "MIC"};
     int target_left = 0, target_right = 0;
     int current_left = 0, current_right = 0;
     s32 enc_left = 0, enc_right = 0;
@@ -566,6 +688,32 @@ void ui_debug_update(void)
         }
 
         ui_debug_update_motor();
+    }
+    else if (s_page == UI_DEBUG_MIC)
+    {
+        /* MIC 页面下 KEY1(短按) 切换声控使能/禁用 */
+        if (key_start_scan())
+        {
+            u8 new_enabled = !mic_is_enabled();
+            mic_set_enabled(new_enabled);
+            
+            /* 反馈提示 */
+            if (new_enabled)
+            {
+                buzzer_beep(1200, 80);   /* 高音短鸣：已启用 */
+            }
+            else
+            {
+                buzzer_beep(800, 80);    /* 低音短鸣：已禁用 */
+            }
+        }
+        
+        /* 可选：KEY_EXT 长按重置触发计数器 */
+        if (key_ext_scan())
+        {
+            mic_trigger_count = 0;
+            mic_last_trigger_tick = (u16)(app_get_tick() & 0xFFFF);
+        }
     }
 
     ui_debug_draw();

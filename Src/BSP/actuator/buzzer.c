@@ -30,7 +30,7 @@ static void buzzer_output(u16 freq)
         buzzer_current_freq = freq;
     }
 
-    pulse = 1000000UL / freq / 2;   /* 50% 占空比 */
+    pulse = 1000000UL / freq / 4;   /* 25% 占空比，降低音量 */
     pwm_buzzer_set((u16)pulse);
 }
 

@@ -27,6 +27,7 @@ static void fsm_enter_running(void)
     s_state = FSM_STATE_RUNNING;
     /* 从 AVOIDING/BRAKING 恢复时，先释放刹车再进入运行 */
     motion_stop();
+    obstacle_guard_clear_emergency_request();
     alarm_control_event(ALARM_EVENT_IDLE);
     alarm_control_set_stat_mode(LED_MODE_STEADY_ON);
 }

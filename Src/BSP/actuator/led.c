@@ -31,6 +31,9 @@ void led_init(void)
 void led_stat_on(void)       { LED_STAT = 1; }
 void led_stat_off(void)      { LED_STAT = 0; }
 void led_stat_toggle(void)   { LED_STAT = !LED_STAT; }
-void led_alarm_on(void)      { LED_ALARM = 1; }
-void led_alarm_off(void)     { LED_ALARM = 0; }
+/* 硬件：+5V → [上拉R] → [LED] → PB10（开漏）
+ * PB10=0(GND) → 电流流过LED → 点亮
+ * PB10=1(高阻) → 被上拉到5V → 无电流 → 熄灭 */
+void led_alarm_on(void)      { LED_ALARM = 0; }
+void led_alarm_off(void)     { LED_ALARM = 1; }
 void led_alarm_toggle(void)  { LED_ALARM = !LED_ALARM; }

@@ -10,7 +10,7 @@
 /* EMA filter: new_val = alpha * raw + (1-alpha) * old, alpha=0.3 gives smooth output */
 #define EMA_ALPHA      0.3f   /* 0.1~0.5: smaller=smoother but slower response */
 #define EMA_ALPHA_FAST 0.8f   /* fast response when obstacle appears (distance decreases) */
-#define EMA_ALPHA_SLOW 0.3f   /* moderate speed when obstacle disappears (distance increases), was 0.1 too slow */
+#define EMA_ALPHA_SLOW 0.5f   /* faster recovery when obstacle disappears (distance increases) */
 
 /* Safety distance when timeout (no echo): keep in hysteresis zone to avoid premature clear */
 #define US_SAFE_DIST_CM   50.0f  /* between AVOID_DIST(20) and AVOID_CLEAR(35) */

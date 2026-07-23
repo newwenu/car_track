@@ -67,6 +67,16 @@ void alarm_control_event(alarm_event_t event)
             /* LED_STAT 由模式管理器统一控制，此处不再单独 toggle */
             break;
 
+        case ALARM_EVENT_AVOIDING:
+            /* 持续报警由 alarm_control_update() 驱动，此处仅设置事件 */
+            buzzer_on(2000);
+            led_alarm_on();
+            break;
+
+        case ALARM_EVENT_BRAKING:
+            /* 周期性提示由 alarm_control_update() 驱动 */
+            break;
+
         case ALARM_EVENT_FINISHED:
             buzzer_beep(FINISHED_BEEP_FREQ, FINISHED_BEEP_MS);
             led_alarm_on();

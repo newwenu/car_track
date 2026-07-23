@@ -9,7 +9,7 @@
 #define AVOID_DIST_CM           20      /* 小于此距离进入避障（cm） */
 #define AVOID_CLEAR_CM          35      /* 大于此距离且保持一段时间解除避障（cm） */
 #define AVOID_TRIGGER_DEBOUNCE  2       /* 2 * 10ms = 20ms 确认触发 */
-#define AVOID_CLEAR_DEBOUNCE    5       /* 5 * 10ms = 50ms 确认解除 */
+#define AVOID_CLEAR_DEBOUNCE    3       /* 3 * 10ms = 30ms 确认解除 */
 
 /* ===================== 静态变量 ===================== */
 static float s_distance = 0.0f;

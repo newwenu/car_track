@@ -13,9 +13,8 @@ typedef enum {
 
 /* 运行模式枚举 */
 typedef enum {
-    UI_MODE_NORMAL = 0,     /* 正常模式 */
-    UI_MODE_RULE,           /* 规定模式 */
-    UI_MODE_SPEED_DEMO,     /* 无极调速展示 */
+    UI_MODE_NORMAL = 0, /* 正常模式 */
+    UI_MODE_RULE,       /* 规定模式 */
     UI_MODE_MAX
 } ui_mode_t;
 

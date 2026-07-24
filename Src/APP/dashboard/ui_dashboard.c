@@ -180,7 +180,7 @@ static void ui_draw_lap(void)
     }
 }
 
-/* 绘制模式字段（正常模式 / 规定模式 / 无极调速展示） */
+/* 绘制模式字段（正常模式 / 规定模式） */
 static void ui_draw_mode(void)
 {
     const u8 mode_normal[] = {UI_CH_ZHENG, UI_CH_CHANG, UI_CH_MO, UI_CH_SHI}; /* 正常模式 */
@@ -193,13 +193,9 @@ static void ui_draw_mode(void)
     {
         ui_draw_chinese_string(32, 0, mode_normal, 4);
     }
-    else if (s_mode == UI_MODE_RULE)
-    {
-        ui_draw_chinese_string(32, 0, mode_rule, 4);
-    }
     else
     {
-        oled_spi_show_string(32, 0, (u8 *)"SPD-DEMO", 16);
+        ui_draw_chinese_string(32, 0, mode_rule, 4);
     }
 }
 

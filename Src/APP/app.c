@@ -13,48 +13,6 @@
 static u8 s_tick_div = 0;
 static volatile u32 s_sys_tick = 0;
 
-/* 无极调速展示状态 */
-static int s_demo_speed = 0;
-static int s_demo_dir = 1;
-static u16 s_demo_pause = 0;
-
-/* 在调速展示模式下循环执行：0 -> 100 -> 0
- * 仅在 IDLE 状态下运行，切出模式或进入其他状态自动复位 */
-static void speed_demo_update(void)
-{
-    if (fsm_get_state() != FSM_STATE_IDLE)
-    {
-        motion_stop();
-        s_demo_speed = 0;
-        s_demo_dir = 1;
-        s_demo_pause = 0;
-        return;
-    }
-
-    if (s_demo_pause > 0)
-    {
-        s_demo_pause--;
-        motion_set_speed(0);
-        return;
-    }
-
-    s_demo_speed += s_demo_dir;
-
-    if (s_demo_speed >= 100)
-    {
-        s_demo_speed = 100;
-        s_demo_dir = -1;
-    }
-    else if (s_demo_speed <= 0)
-    {
-        s_demo_speed = 0;
-        s_demo_dir = 1;
-        s_demo_pause = 50;  /* 到零后停顿 500ms */
-    }
-
-    motion_set_speed(s_demo_speed);
-}
-
 void app_init(void)
 {
     vehicle_init();
@@ -144,12 +102,6 @@ void app_update(void)
     if (s_tick_div % (APP_FSM_PERIOD_MS / APP_TICK_MS) == 0)
     {
         fsm_update();
-    }
-
-    /* 调速展示模式：在状态机之后覆盖目标速度，演示 0->100->0 平滑加减速 */
-    if (ui_get_mode() == UI_MODE_SPEED_DEMO)
-    {
-        speed_demo_update();
     }
 
     /* ========== 50ms 任务：UI ========== */

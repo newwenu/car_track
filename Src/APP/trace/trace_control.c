@@ -16,7 +16,7 @@
  * 30% PWM 对应空载约 20cm/s，带载约 12~17cm/s，适合过弯。
  * 若赛道直道较长且小车稳定，可适度提高 BASE_SPEED_NORMAL。 */
 #define BASE_SPEED_NORMAL       65      /* 直道基础速度百分比：调低便于观察调试 */
-#define BASE_SPEED_CURVE        40      /* 弯道基础速度百分比：调低便于观察调试 */
+#define BASE_SPEED_CURVE        43      /* 弯道基础速度百分比：调低便于观察调试 */
 // #define CURVE_ERROR_THR         0.95f    /* |error| 超过此值认为在弯道；4路最大误差为1.5 */
 
 /* ===================== 分段PD控制参数 ===================== */
@@ -52,6 +52,13 @@
 #define LOST_STEER_PCT          10      /* 寻线转向量：减小丢线时转弯角度，双轮差速寻线 */
 #define STRAIGHT_COAST_THR      0.4f    /* |error| 小于此值认为之前在直道 */
 #define STRAIGHT_COAST_TICKS    10      /* 直道短暂丢线后继续直行的周期数 (10 * 20ms = 200ms) */
+#define ALL_BLACK_COAST_TICKS   5       /* 全黑时维持之前状态，5 * 20ms = 100ms */
+
+/* 左右轮平衡补偿：针对硬件个体差异导致的双轮出力不对称。
+ * 标准值 100 = 无补偿；若左轮偏弱，增大 MOTOR_LEFT_BALANCE；
+ * 若右轮偏弱，增大 MOTOR_RIGHT_BALANCE。范围建议 80~120。 */
+#define MOTOR_LEFT_BALANCE      105     /* 左轮补偿百分比 */
+#define MOTOR_RIGHT_BALANCE     100     /* 右轮补偿百分比 */
 
 /* 传感器权重：4路等距布局，AO1最右=+1.5，AO4最左=-1.5 */
 static const float s_weights[BSP_TRACE_CH_COUNT] = {
@@ -70,6 +77,7 @@ static u8   s_lost_cnt = 0;            /* 连续丢线计数 */
 static u8   s_lost_recovery_cnt = 0;   /* 寻线耗时计数 */
 static u8   s_is_lost = 0;             /* 丢线标志 */
 static u8   s_straight_coast_cnt = 0;  /* 直道丢线后继续直行计数 */
+static u8   s_all_black_coast_cnt = 0; /* 全黑时维持之前状态计数 */
 static float s_current_speed = 65.0f;  /* 当前实际速度（平滑后），初始化为NORMAL */
 
 /* ===================== 内部辅助函数 ===================== */
@@ -126,6 +134,21 @@ static float trace_calc_error(void)
         s_straight_coast_cnt = 0;
         s_is_lost = 0;
 
+        /* 全部检测到黑线：短暂维持之前运动状态，
+         * 避免十字路口或宽线处突然直行导致偏离。 */
+        if (cnt == 4.0f)
+        {
+            if (s_all_black_coast_cnt < ALL_BLACK_COAST_TICKS)
+            {
+                s_all_black_coast_cnt++;
+                return s_last_error;
+            }
+        }
+        else
+        {
+            s_all_black_coast_cnt = 0;
+        }
+
         /* 中间两个通道（AO2、AO3）任意一个检测到黑线且两侧都没有时，
          * 认为小车居中在线上，按直行处理，抑制小幅抖动。 */
         if ((s_black_state[0] == 0) && (s_black_state[3] == 0) &&
@@ -137,8 +160,9 @@ static float trace_calc_error(void)
         return sum / cnt;
     }
 
-    /* 全部未检测到黑线：若之前处于直道（误差较小），允许短暂继续直行，
+    /* 全部未检测到黑线：清除全黑计数，若之前处于直道（误差较小），允许短暂继续直行，
      * 不立即计为丢线，提高对黑线断续或反光间隙的容忍度。 */
+    s_all_black_coast_cnt = 0;
     if ((s_last_error > -STRAIGHT_COAST_THR) &&
         (s_last_error < STRAIGHT_COAST_THR) &&
         (s_straight_coast_cnt < STRAIGHT_COAST_TICKS))
@@ -332,8 +356,8 @@ void trace_control_update(void)
         }
     }
 
-    s_left_pct  = base_speed + (int)diff;
-    s_right_pct = base_speed - (int)diff;
+    s_left_pct  = (int)((long)(base_speed + (int)diff) * MOTOR_LEFT_BALANCE / 100);
+    s_right_pct = (int)((long)(base_speed - (int)diff) * MOTOR_RIGHT_BALANCE / 100);
 }
 
 float trace_control_get_error(void)

@@ -197,8 +197,11 @@ void fsm_update(void)
 
         case FSM_STATE_RUNNING:
         {
-            /* 仅在运行状态更新计圈，避免 IDLE/调试等阶段误触发 */
-            lap_counter_update();
+            /* 仅在规则模式更新计圈，正常模式自由循迹不跑圈 */
+            if (ui_get_mode() == UI_MODE_RULE)
+            {
+                lap_counter_update();
+            }
 
             /* 运行总时长保护：超过 99s 强制结束 */
             fsm_update_run_timer();

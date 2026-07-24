@@ -615,7 +615,7 @@ static float rt_calc_exit_brake(float err, float last_err, float last_last_err)
         (vel * err < 0.0f) &&
         (abs_last > RT_EXIT_BRAKE_ZONE))
     {
-        float brake = -RT_EXIT_BRAKE_COEF * vel;
+        float brake = RT_EXIT_BRAKE_COEF * vel;
         const float max_b = 10.0f;
         if (brake > max_b) brake = max_b;
         if (brake < -max_b) brake = -max_b;

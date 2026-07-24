@@ -200,7 +200,7 @@ void fsm_update(void)
             /* 仅在规则模式更新计圈，正常模式自由循迹不跑圈 */
             if (ui_get_mode() == UI_MODE_RULE)
             {
-                lap_counter_update();
+                lap_counter_update(1);
             }
 
             /* 运行总时长保护：超过 99s 强制结束 */

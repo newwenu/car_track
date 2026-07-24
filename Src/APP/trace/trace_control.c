@@ -233,7 +233,7 @@ static float trace_calc_exit_brake(float error, float last_error, float last_las
         /* 制动量 = 系数 × 减小速率
          * error_vel为负值（减小），乘以系数后得到正值或负值的制动量
          * 方向与error相反，帮助提前回正 */
-        float brake = -EXIT_BRAKE_COEF * error_vel;
+        float brake = EXIT_BRAKE_COEF * error_vel;
 
         /* 限制最大制动力，防止过度矫正 */
         const float max_brake = 8.0f;

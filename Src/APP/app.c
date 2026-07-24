@@ -6,11 +6,54 @@
 #include "control/app_fsm.h"
 #include "obstacle/obstacle_guard.h"
 #include "trace/trace_control.h"
+#include "trace/race_track.h"
 #include "../BSP/sensor/mic.h"
 #include "../BSP/actuator/buzzer.h"
 
 static u8 s_tick_div = 0;
 static volatile u32 s_sys_tick = 0;
+
+/* 无极调速展示状态 */
+static int s_demo_speed = 0;
+static int s_demo_dir = 1;
+static u16 s_demo_pause = 0;
+
+/* 在调速展示模式下循环执行：0 -> 100 -> 0
+ * 仅在 IDLE 状态下运行，切出模式或进入其他状态自动复位 */
+static void speed_demo_update(void)
+{
+    if (fsm_get_state() != FSM_STATE_IDLE)
+    {
+        motion_stop();
+        s_demo_speed = 0;
+        s_demo_dir = 1;
+        s_demo_pause = 0;
+        return;
+    }
+
+    if (s_demo_pause > 0)
+    {
+        s_demo_pause--;
+        motion_set_speed(0);
+        return;
+    }
+
+    s_demo_speed += s_demo_dir;
+
+    if (s_demo_speed >= 100)
+    {
+        s_demo_speed = 100;
+        s_demo_dir = -1;
+    }
+    else if (s_demo_speed <= 0)
+    {
+        s_demo_speed = 0;
+        s_demo_dir = 1;
+        s_demo_pause = 50;  /* 到零后停顿 500ms */
+    }
+
+    motion_set_speed(s_demo_speed);
+}
 
 void app_init(void)
 {
@@ -64,26 +107,22 @@ void app_update(void)
     obstacle_guard_update();
     motion_update();
 
-    /* 声控起停：单次拍手启动，连续两次拍手停止/复位
-     * 需在 DEBUG-MIC 页通过 KEY1 使能 mic_set_enabled(1) */
-    if (mic_is_enabled())
+    /* 声控起停仅在规定模式启用：单次拍手启动，连续两次拍手停止/复位 */
+    if (ui_get_mode() == UI_MODE_RULE)
     {
         u8 tap = mic_scan();
         if (tap != 0)
         {
-            /* 通知调试页更新触发计数器（仅当在MIC页面时生效） */
             ui_debug_mic_on_trigger(tap);
 
             if (tap == 1 && (fsm_get_state() == FSM_STATE_IDLE ||
                              fsm_get_state() == FSM_STATE_FINISHED))
             {
-                /* 待机/完成状态下单次拍手 → 启动 */
                 fsm_start();
             }
             else if (tap == 2 && (fsm_get_state() != FSM_STATE_IDLE &&
                                   fsm_get_state() != FSM_STATE_FINISHED))
             {
-                /* 运行/避障/A点暂停状态下连续两次拍手 → 紧急停车复位 */
                 motion_brake();
                 fsm_reset();
             }
@@ -93,11 +132,24 @@ void app_update(void)
     /* ========== 20ms 任务：循迹控制 + 状态机 ========== */
     if (s_tick_div % (APP_TRACE_PERIOD_MS / APP_TICK_MS) == 0)
     {
-        trace_control_update();
+        if (ui_get_mode() == UI_MODE_RULE)
+        {
+            race_track_update();
+        }
+        else
+        {
+            trace_control_update();
+        }
     }
     if (s_tick_div % (APP_FSM_PERIOD_MS / APP_TICK_MS) == 0)
     {
         fsm_update();
+    }
+
+    /* 调速展示模式：在状态机之后覆盖目标速度，演示 0->100->0 平滑加减速 */
+    if (ui_get_mode() == UI_MODE_SPEED_DEMO)
+    {
+        speed_demo_update();
     }
 
     /* ========== 50ms 任务：UI ========== */

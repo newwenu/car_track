@@ -3,6 +3,19 @@
 #include <stddef.h>
 
 /* ========================================================================
+ * 编码器配置说明：
+ *
+ * 当前小车采用同轴双轮驱动方案，左右轮直接同轴连接电机，
+ * 不存在差速比（differential ratio = 1:1）。
+ *
+ * 因此 encoder_read() 返回值为左右轮脉冲之和，
+ * 用于统一计算车速和里程。
+ *
+ * 低通滤波：采用一阶 IIR 滤波器平滑编码器读数，
+ * 抑制机械振动和电磁干扰引起的高频噪声。
+ * ======================================================================== */
+
+/* ========================================================================
  * DWT (Data Watchpoint and Trace) 周期计数器
  *
  * 用于编码器中断消抖的时间戳。DWT->CYCCNT 是 Cortex-M3 内核自带的
@@ -31,6 +44,22 @@ static volatile u32 enc_r_last_cycles = 0;
 
 /* 消抖阈值：初始化时根据 SystemCoreClock 换算成 CPU 周期数 */
 static u32 enc_debounce_cycles = 0;
+
+/* ========================================================================
+ * 低通滤波器参数（一阶 IIR）
+ *
+ * 滤波公式：y[n] = α * x[n] + (1 - α) * y[n-1]
+ *
+ * ENC_LPF_ALPHA: 滤波系数，范围 (0, 1]
+ *   - 值越小，滤波越强，响应越慢
+ *   - 值越大，滤波越弱，响应越快
+ *   - 推荐值：0.1 ~ 0.3（可根据实际噪声情况调整）
+ *
+ * enc_lpf_prev: 上一次滤波输出值，用于递推计算
+ * ======================================================================== */
+#define ENC_LPF_ALPHA        0.2f    /* 滤波系数，可调 */
+
+static float enc_lpf_prev = 0.0f;    /* 滤波器状态变量 */
 
 void encoder_init(void)
 {
@@ -68,11 +97,12 @@ void encoder_init(void)
     DWT_CTRL |= DWT_CTRL_CYCCNTENA;
     enc_debounce_cycles = (SystemCoreClock / 1000000UL) * ENC_DEBOUNCE_US;
 
-    /* 显式清零脉冲计数和消抖时间戳，确保从干净状态启动 */
+    /* 显式清零脉冲计数、消抖时间戳和滤波器状态，确保从干净状态启动 */
     enc_left_pulse = 0;
     enc_right_pulse = 0;
     enc_l_last_cycles = 0;
     enc_r_last_cycles = 0;
+    enc_lpf_prev = 0.0f;   /* 初始化滤波器输出为 0 */
 
     /* 注意：EXTI9_5_IRQn 与按键模式键共享，最终优先级由 key_start_irq_init 统一设置 */
     NVIC_InitStructure.NVIC_IRQChannel = BSP_ENC_L_IRQ;
@@ -96,16 +126,23 @@ void encoder_right_inc(void)
 
 int encoder_read(void)
 {
-    int val;
+    int raw_val;
+    float filtered_val;
 
     /* 读数和清零需原子执行，防止中断期间丢脉冲 */
     __disable_irq();
-    val = (int)(enc_left_pulse + enc_right_pulse);
+    raw_val = (int)(enc_left_pulse + enc_right_pulse);
     enc_left_pulse = 0;
     enc_right_pulse = 0;
     __enable_irq();
 
-    return val;
+    /* 应用一阶 IIR 低通滤波器
+     * y[n] = α * x[n] + (1 - α) * y[n-1]
+     * 有效抑制编码器高频噪声（机械振动、电磁干扰等）*/
+    filtered_val = ENC_LPF_ALPHA * (float)raw_val + (1.0f - ENC_LPF_ALPHA) * enc_lpf_prev;
+    enc_lpf_prev = filtered_val;
+
+    return (int)filtered_val;
 }
 
 void encoder_get_counts(s32 *left, s32 *right)

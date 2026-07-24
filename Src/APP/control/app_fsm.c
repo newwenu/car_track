@@ -1,8 +1,10 @@
 #include "app_fsm.h"
 #include "../motion/motion_control.h"
+#include "../vehicle/vehicle_state.h"
 #include "../dashboard/ui_dashboard.h"
 #include "../dashboard/ui_debug.h"
 #include "../trace/trace_control.h"
+#include "../trace/race_track.h"
 #include "../obstacle/obstacle_guard.h"
 #include "../mission/lap_counter.h"
 #include "../alarm/alarm_control.h"
@@ -19,6 +21,43 @@
 static fsm_state_t s_state = FSM_STATE_IDLE;
 static u16 s_brake_ticks = 0;
 static u32 s_run_ms = 0;
+
+/* 根据当前模式选择循迹算法 */
+static void trace_init(void)
+{
+    if (ui_get_mode() == UI_MODE_RULE)
+    {
+        race_track_init();
+    }
+    else
+    {
+        trace_control_init();
+    }
+}
+
+static void trace_get_targets(int *left, int *right)
+{
+    if (ui_get_mode() == UI_MODE_RULE)
+    {
+        race_track_get_wheel_targets(left, right);
+    }
+    else
+    {
+        trace_control_get_wheel_targets(left, right);
+    }
+}
+
+static u8 trace_is_lost_timeout(void)
+{
+    if (ui_get_mode() == UI_MODE_RULE)
+    {
+        return race_track_is_lost_timeout();
+    }
+    else
+    {
+        return trace_control_is_lost_timeout();
+    }
+}
 
 /* ===================== 内部状态切换 ===================== */
 
@@ -82,7 +121,7 @@ void fsm_init(void)
     s_run_ms = 0;
 
     motion_init();
-    trace_control_init();
+    trace_init();
     obstacle_guard_init();
     lap_counter_init();
     alarm_control_init();
@@ -109,9 +148,13 @@ void fsm_reset(void)
     s_run_ms = 0;
 
     motion_stop();
-    trace_control_init();
+    trace_init();
     obstacle_guard_init();
     lap_counter_reset();
+
+    /* 清零车速/里程：确保每次启动都是从零开始统计 */
+    vehicle_reset_distance();
+
     alarm_control_event(ALARM_EVENT_IDLE);
     alarm_control_set_stat_mode(LED_MODE_SLOW_BLINK);
     ui_timer_stop();
@@ -190,12 +233,12 @@ void fsm_update(void)
             }
 
             /* 执行循迹：获取目标轮速并下发 */
-            trace_control_get_wheel_targets(&left_pct, &right_pct);
+            trace_get_targets(&left_pct, &right_pct);
 
             /* 丢线寻线超时：先停车等待，不直接结束。
              * 若后续重新寻到线，FSM 仍在 RUNNING，会自动恢复运行。
              * 99s 总运行超时保护仍可作为最终安全兜底。 */
-            if (trace_control_is_lost_timeout())
+            if (trace_is_lost_timeout())
             {
                 motion_stop();
                 break;

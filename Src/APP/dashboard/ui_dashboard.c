@@ -3,6 +3,7 @@
 #include "../../BSP/display/oled_spi.h"
 #include "../../BSP/display/oledfont.h"
 #include "../../BSP/input/key.h"
+#include "../../BSP/sensor/mic.h"
 #include "../control/app_fsm.h"
 #include "../mission/lap_counter.h"
 #include <stdio.h>
@@ -179,7 +180,7 @@ static void ui_draw_lap(void)
     }
 }
 
-/* 绘制模式字段（正常模式 / 规定模式） */
+/* 绘制模式字段（正常模式 / 规定模式 / 无极调速展示） */
 static void ui_draw_mode(void)
 {
     const u8 mode_normal[] = {UI_CH_ZHENG, UI_CH_CHANG, UI_CH_MO, UI_CH_SHI}; /* 正常模式 */
@@ -192,9 +193,13 @@ static void ui_draw_mode(void)
     {
         ui_draw_chinese_string(32, 0, mode_normal, 4);
     }
-    else
+    else if (s_mode == UI_MODE_RULE)
     {
         ui_draw_chinese_string(32, 0, mode_rule, 4);
+    }
+    else
+    {
+        oled_spi_show_string(32, 0, (u8 *)"SPD-DEMO", 16);
     }
 }
 
@@ -294,6 +299,13 @@ void ui_set_mode(ui_mode_t mode)
     if (s_mode != mode)
     {
         s_mode = mode;
+
+        /* 规则模式下自动启用声控，无需在 DEBUG-MIC 页手动使能 */
+        if (s_mode == UI_MODE_RULE)
+        {
+            mic_set_enabled(1);
+        }
+
         if (s_current_page == UI_PAGE_MODE)
         {
             ui_draw_mode();

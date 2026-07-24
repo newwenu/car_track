@@ -25,36 +25,34 @@ void lap_counter_update(void)
 {
     s_just_passed = 0;
 
-    /* 暂时禁用计圈，避免调试阶段 A 点误触发影响丢线恢复测试 */
-    (void)s_debounce;
-    (void)s_a_left;
-    (void)s_lap_count;
-    return;
-
-#if 0
     if (!trace_control_is_all_black())
     {
+        /* 未检测到 A 点（非全黑），清零消抖并标记已离开 A 点 */
         s_debounce = 0;
-        s_a_left = 1;
+        if (!s_a_left)
+        {
+            s_a_left = 1;   /* 第一次离开 A 点区域，允许下一次计圈 */
+        }
         return;
     }
 
+    /* 连续检测到全黑（十字 / A 点），消抖计数 */
     if (s_debounce < APOINT_DEBOUNCE)
     {
         s_debounce++;
         return;
     }
 
-    /* 消抖完成，但仍需确认已离开过 A 点才算新一圈 */
+    /* 消抖完成（连续 N 次全黑），但仍需确认已离开过 A 点才算新一圈 */
     if (!s_a_left)
     {
         return;
     }
 
+    /* 新的一圈：离开过 A 点 → 再次到达 A 点（全黑消抖通过） */
     s_a_left = 0;
     s_lap_count++;
     s_just_passed = 1;
-#endif
 }
 
 u8 lap_counter_just_passed_a(void)

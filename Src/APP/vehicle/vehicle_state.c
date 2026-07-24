@@ -15,6 +15,7 @@ void vehicle_init(void)
 {
     s_distance_cm = 0;
     s_speed_cm_s = 0;
+    encoder_read();  /* 清空编码器初始化期间可能积累的噪声脉冲 */
 }
 
 void vehicle_update(void)
@@ -22,7 +23,10 @@ void vehicle_update(void)
     int pulses = encoder_read();  /* 取上次调用至今的累计脉冲 */
     u32 dist_inc_x100;
 
-    if (pulses < 0)
+    /* 过滤噪声：负值（方向反转，当前硬件不支持）或孤立脉冲一律丢弃。
+     * 阈值 2 意味着 100ms 采样周期内至少需要 2 个有效脉冲，
+     * 配合 ISR 消抖可彻底消除振动产生的虚假里程。 */
+    if (pulses < 2)
     {
         pulses = 0;
     }

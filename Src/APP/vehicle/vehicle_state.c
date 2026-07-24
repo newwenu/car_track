@@ -7,14 +7,21 @@
 #define VEHICLE_DIST_PER_PULSE_X100 \
     ((u32)((314UL * VEHICLE_WHEEL_DIAMETER_MM) / (VEHICLE_ENCODER_PPR * 2)))
 
+/* 速度一阶低通滤波：filtered += (raw - filtered) >> N
+ * N=3 → 平滑系数 1/8，100ms 采样周期下时间常数约 700ms，
+ * 有效抑制振动尖峰，同时对真实速度变化保持亚秒级响应。 */
+#define VEHICLE_SPEED_LPF_SHIFT  3
+
 /* 静态变量 */
 static u32 s_distance_cm = 0;
 static u16 s_speed_cm_s = 0;
+static u16 s_speed_raw = 0;       /* 滤波前的原始速度，调试用（暂存） */
 
 void vehicle_init(void)
 {
     s_distance_cm = 0;
     s_speed_cm_s = 0;
+    s_speed_raw  = 0;
     encoder_read();  /* 清空编码器初始化期间可能积累的噪声脉冲 */
 }
 
@@ -37,8 +44,20 @@ void vehicle_update(void)
     /* 累计里程（cm）：dist_inc_x100 单位是 mm*100，需 /1000 得到 cm */
     s_distance_cm += dist_inc_x100 / 1000;
 
-    /* 速度 = 距离(cm) / 时间(s) = pulses * dist_per_pulse_x100 / sample_ms */
-    s_speed_cm_s = (u16)((u32)pulses * VEHICLE_DIST_PER_PULSE_X100 / VEHICLE_SAMPLE_MS);
+    /* 速度(cm/s) = pulses * dist_per_pulse_x100 / sample_ms */
+    s_speed_raw = (u16)((u32)pulses * VEHICLE_DIST_PER_PULSE_X100 / VEHICLE_SAMPLE_MS);
+
+    /* 一阶低通滤波抑制振动尖峰：
+     * filtered += (raw - filtered) >> SHIFT
+     * 首次有效读数直接赋值，避免从 0 缓慢爬升 */
+    if (s_speed_cm_s == 0 && s_speed_raw != 0)
+    {
+        s_speed_cm_s = s_speed_raw;
+    }
+    else
+    {
+        s_speed_cm_s += (s16)(s_speed_raw - s_speed_cm_s) >> VEHICLE_SPEED_LPF_SHIFT;
+    }
 }
 
 u16 vehicle_get_speed_cm_s(void)

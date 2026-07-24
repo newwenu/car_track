@@ -180,12 +180,14 @@
 #define BSP_LED_ALARM_BIT       10
 
 /*---------------------------------------------------------------------------
- * 10. 声控 — PB7（GPIO 数字输入，比较器输出）
+ * 10. 声控 — PB0（ADC1_CH8 模拟量输入，读 LM393 比较器输出电压）
+ *     硬件：咪头 393 OUT 接 PB0。软件 ADC 阈值区分有/无声音。
  *---------------------------------------------------------------------------*/
 #define BSP_MIC_PORT            GPIOB
 #define BSP_MIC_CLK             RCC_APB2Periph_GPIOB
-#define BSP_MIC_PIN             GPIO_Pin_7
-#define BSP_MIC_BIT             7
+#define BSP_MIC_PIN             GPIO_Pin_0
+#define BSP_MIC_BIT             0
+#define BSP_MIC_ADC_CH          ADC_Channel_8
 
 /*---------------------------------------------------------------------------
  * 11. JTAG 释放 — 使用 PA15/PB3/PB4 前必须调用

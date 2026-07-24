@@ -325,26 +325,27 @@ static void ui_debug_stop_act(void)
 }
 
 /* ===================== 声控 MIC 调试页 ===================== */
-static u8  mic_last_raw = 0;           /* 上次原始电平 */
+static u16 mic_last_adc = 0;           /* 上次 ADC 值 */
 static u8  mic_trigger_count = 0;      /* 触发计数器（本次进入页面后） */
 static u16 mic_last_trigger_tick = 0;  /* 上次触发时刻 */
 static u8  mic_last_tap = 0;           /* 上次触发类型：1=单次，2=双次 */
 
-/* 声控咪头检测页 - 显示原始电平、消抖状态、触发历史等 */
+/* 声控咪头检测页 - 显示 ADC 值、阈值判断、触发历史等 */
 static void ui_debug_draw_mic(void)
 {
     char buf[36];
-    u8 raw = mic_get_raw();             /* 读取当前原始电平 */
+    u16 adc = mic_get_raw();            /* 读取当前 ADC 值（上次转换结果） */
     u8 enabled = mic_is_enabled();      /* 读取使能状态 */
+    u8 sound = (adc < MIC_ADC_THRESHOLD) ? 1 : 0;  /* ADC低于阈值=有声音 */
 
-    /* 第1行：标题 + 使能状态 */
-    sprintf(buf, "MIC:%s  %s", 
+    /* 第1行：标题 + 使能状态 + 变化指示 */
+    sprintf(buf, "MIC:%s  %s",
             enabled ? "ON" : "OFF",
-            (raw != mic_last_raw) ? "*" : " ");
+            (adc != mic_last_adc) ? "*" : " ");
     oled_spi_show_string(0, 1, (u8 *)buf, 8);
 
-    /* 第2行：原始电平 (RAW) 和边沿变化指示 */
-    sprintf(buf, "RAW:%d%s", raw, (raw == 0) ? "(LOW)" : "(HI)");
+    /* 第2行：ADC 值 + 阈值判断结果 */
+    sprintf(buf, "ADC:%-5d%s", adc, sound ? "(HI/SND)" : "(LOW/SIL)");
     oled_spi_show_string(0, 2, (u8 *)buf, 8);
 
     /* 第3行：触发统计 */
@@ -369,8 +370,8 @@ static void ui_debug_draw_mic(void)
         oled_spi_show_string(0, 3, (u8 *)buf, 8);
     }
 
-    /* 第4行：消抖参数显示 */
-    sprintf(buf, "DEB:3cnt(30ms) WIN:800ms");
+    /* 第4行：消抖参数 + ADC 阈值 */
+    sprintf(buf, "DEB:3 THR:%d", MIC_ADC_THRESHOLD);
     oled_spi_show_string(0, 4, (u8 *)buf, 8);
 
     /* 第5-6行：操作提示 */
@@ -385,8 +386,8 @@ static void ui_debug_draw_mic(void)
         oled_spi_show_string(0, 6, (u8 *)"MIC DISABLED", 8);
     }
 
-    /* 更新内部状态（用于边沿检测） */
-    mic_last_raw = raw;
+    /* 更新内部状态（用于检测 ADC 值变化） */
+    mic_last_adc = adc;
 
     /* 检测是否刚被触发（通过观察tick变化或调用mic_scan的返回值） */
     /* 注意：这里不主动调用mic_scan，避免重复扫描 */
@@ -395,7 +396,7 @@ static void ui_debug_draw_mic(void)
 /* 进入MIC调试页时的初始化 */
 static void ui_debug_enter_mic(void)
 {
-    mic_last_raw = mic_get_raw();
+    mic_last_adc = mic_get_raw();
     mic_trigger_count = 0;
     mic_last_tap = 0;
     mic_last_trigger_tick = (u16)(app_get_tick() & 0xFFFF);

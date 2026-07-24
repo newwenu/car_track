@@ -6,7 +6,6 @@
 #include "control/app_fsm.h"
 #include "obstacle/obstacle_guard.h"
 #include "trace/trace_control.h"
-#include "trace/race_track.h"
 #include "../BSP/sensor/mic.h"
 #include "../BSP/actuator/buzzer.h"
 
@@ -90,14 +89,7 @@ void app_update(void)
     /* ========== 20ms 任务：循迹控制 + 状态机 ========== */
     if (s_tick_div % (APP_TRACE_PERIOD_MS / APP_TICK_MS) == 0)
     {
-        if (ui_get_mode() == UI_MODE_RULE)
-        {
-            race_track_update();
-        }
-        else
-        {
-            trace_control_update();
-        }
+        trace_control_update();
     }
     if (s_tick_div % (APP_FSM_PERIOD_MS / APP_TICK_MS) == 0)
     {

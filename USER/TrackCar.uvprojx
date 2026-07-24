@@ -708,11 +708,6 @@
               <FileType>1</FileType>
               <FilePath>..\Src\APP\dashboard\ui_debug.c</FilePath>
             </File>
-            <File>
-              <FileName>race_track.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Src\APP\trace\race_track.c</FilePath>
-            </File>
           </Files>
         </Group>
       </Groups>

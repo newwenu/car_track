@@ -1,7 +1,5 @@
 #include "lap_counter.h"
 #include "../trace/trace_control.h"
-#include "../trace/race_track.h"
-
 /* ===================== 可调参数 ===================== */
 #define APOINT_DEBOUNCE         2       /* 2 次连续全黑才认为过 A 点 */
 #define LAP_TARGET              2       /* 目标圈数 */
@@ -22,23 +20,11 @@ void lap_counter_init(void)
     s_just_passed = 0;
 }
 
-void lap_counter_update(u8 is_rule_mode)
+void lap_counter_update(void)
 {
-    u8 is_all_black;
-
     s_just_passed = 0;
 
-    /* 规则模式使用 race_track 的传感器状态，标准模式使用 trace_control */
-    if (is_rule_mode)
-    {
-        is_all_black = race_track_is_all_black();
-    }
-    else
-    {
-        is_all_black = trace_control_is_all_black();
-    }
-
-    if (!is_all_black)
+    if (!trace_control_is_all_black())
     {
         /* 未检测到 A 点（非全黑），清零消抖并标记已离开 A 点 */
         s_debounce = 0;

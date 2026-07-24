@@ -6,9 +6,8 @@
 /* 初始化计圈模块 */
 void lap_counter_init(void);
 
-/* 周期性更新 A 点检测状态。
- * is_rule_mode: 1=规则模式(使用 race_track 传感器), 0=标准模式(使用 trace_control 传感器) */
-void lap_counter_update(u8 is_rule_mode);
+/* 周期性更新 A 点检测状态 */
+void lap_counter_update(void);
 
 /* 是否刚刚经过 A 点（本次调用周期内为真，仅一次） */
 u8 lap_counter_just_passed_a(void);
